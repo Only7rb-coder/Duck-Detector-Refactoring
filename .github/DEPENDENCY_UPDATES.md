@@ -39,7 +39,11 @@ partial merge. Repeated runs do not duplicate open or closed PRs for that set.
 Published branches are never force-pushed. Existing/orphan branches are checked
 against their merge base: only the three owned properties may change, without
 downgrades, and the complete target set must match the branch name. Unrelated
-staged files are rejected before publishing a new branch.
+staged files are rejected before publishing a new branch. New branch content is
+also compared against the checked-out base: unrelated properties, comments and
+line endings must remain byte-for-byte unchanged, and the report must exactly
+describe the staged tool pin changes. The same content validation applies when
+reusing an existing branch.
 
 The workflow explicitly dispatches the existing secret-free `ci.yml` on a new
 PR branch using `GITHUB_TOKEN`, so a

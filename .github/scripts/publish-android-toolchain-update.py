@@ -31,7 +31,9 @@ SPEC.loader.exec_module(UPDATER)
 
 
 def command(*args: str) -> str:
-    return subprocess.check_output(args, text=True).strip()
+    # Git blobs must retain CRLFs, blank lines and surrounding whitespace for
+    # exact comparison. Trim only metadata at its individual call sites.
+    return subprocess.check_output(args).decode("utf-8")
 
 
 def properties(text: str) -> tuple[str, dict[str, str]]:
@@ -42,24 +44,28 @@ def properties(text: str) -> tuple[str, dict[str, str]]:
     return text, pins
 
 
-def validate_existing_branch(report: dict, run=command) -> str:
-    """An orphan ref must contain only this bot's tool updates before opening a PR."""
-    base = run("git", "merge-base", "HEAD", "FETCH_HEAD")
-    if run("git", "diff", "--name-only", base, "FETCH_HEAD") != "gradle.properties":
-        raise ValueError("Existing bot branch contains unexpected changed files")
-    old_text, old_pins = properties(run("git", "show", f"{base}:gradle.properties"))
-    published = run("git", "show", "FETCH_HEAD:gradle.properties")
+def validate_property_update(original: str, published: str, report: dict) -> None:
+    old_text, old_pins = properties(original)
     new_text, new_pins = properties(published)
     if old_text != new_text:
-        raise ValueError("Existing bot branch changes unrelated Gradle properties")
+        raise ValueError("Update changes unrelated Gradle properties")
     if any(UPDATER.version(new_pins[key]) < UPDATER.version(old_pins[key]) for key in old_pins):
-        raise ValueError("Existing bot branch downgrades a tool pin")
+        raise ValueError("Update downgrades a tool pin")
     for item in report["changes"]:
         if new_pins[item["property"]] != item["to"]:
-            raise ValueError("Existing bot branch has different target tool versions")
+            raise ValueError("Update has different target tool versions")
     if UPDATER.target_branch(published) != report["branch"]:
-        raise ValueError("Existing bot branch does not match its complete target pin set")
-    return run("git", "rev-parse", "FETCH_HEAD")
+        raise ValueError("Update does not match its complete target pin set")
+
+
+def validate_existing_branch(report: dict, run=command) -> str:
+    """An orphan ref must contain only this bot's tool updates before opening a PR."""
+    base = run("git", "merge-base", "HEAD", "FETCH_HEAD").strip()
+    if run("git", "diff", "--name-only", base, "FETCH_HEAD").strip() != "gradle.properties":
+        raise ValueError("Existing bot branch contains unexpected changed files")
+    validate_property_update(run("git", "show", f"{base}:gradle.properties"),
+                             run("git", "show", "FETCH_HEAD:gradle.properties"), report)
+    return run("git", "rev-parse", "FETCH_HEAD").strip()
 
 
 def ensure_ci(branch: str, sha: str, run=command) -> None:
@@ -95,7 +101,7 @@ def publish(report: dict, body_file: Path, base_branch: str, run=command) -> Non
     if prs and prs[0]["state"] != "OPEN":
         print(f"Respecting closed/merged pull request #{prs[0]['number']}")
         return
-    remote = run("git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}")
+    remote = run("git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}").strip()
     if remote:
         run("git", "fetch", "origin", f"refs/heads/{branch}")
         sha = validate_existing_branch(report, run)
@@ -104,15 +110,24 @@ def publish(report: dict, body_file: Path, base_branch: str, run=command) -> Non
             raise ValueError("Open update PR has no remote branch")
         run("git", "switch", "-c", branch)
         run("git", "add", "--", "gradle.properties")
-        if run("git", "diff", "--cached", "--name-only") != "gradle.properties":
+        if run("git", "diff", "--cached", "--name-only").strip() != "gradle.properties":
             raise ValueError("Refusing to commit unrelated staged files")
-        if UPDATER.target_branch(run("git", "show", ":gradle.properties")) != branch:
+        staged = run("git", "show", ":gradle.properties")
+        if UPDATER.target_branch(staged) != branch:
             raise ValueError("Staged properties do not match the target pin set")
+        original = run("git", "show", "HEAD:gradle.properties")
+        validate_property_update(original, staged, report)
+        old_pins = UPDATER.pinned_properties(original)
+        new_pins = UPDATER.pinned_properties(staged)
+        actual = [{"property": key, "from": old_pins[key], "to": new_pins[key]}
+                  for key in UPDATER.PACKAGES if old_pins[key] != new_pins[key]]
+        if actual != report["changes"]:
+            raise ValueError("Update report does not match the checked-out base pins")
         run("git", "-c", "user.name=github-actions[bot]", "-c",
             "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m",
             "chore(deps): update stable Android toolchain pins")
         run("git", "push", "origin", f"HEAD:refs/heads/{branch}")
-        sha = run("git", "rev-parse", "HEAD")
+        sha = run("git", "rev-parse", "HEAD").strip()
 
     if prs:
         if prs[0]["headRefOid"] != sha:

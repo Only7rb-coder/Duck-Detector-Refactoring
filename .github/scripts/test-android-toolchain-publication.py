@@ -63,20 +63,21 @@ class PublicationTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def git(self, *args, cwd=None):
-        return subprocess.check_output(["git", *args], cwd=cwd or self.repo, text=True,
-                                       stderr=subprocess.DEVNULL).strip()
+    def git(self, *args, cwd=None, raw=False):
+        output = subprocess.check_output(["git", *args], cwd=cwd or self.repo,
+                                         stderr=subprocess.DEVNULL).decode("utf-8")
+        return output if raw else output.strip()
 
     def checkout(self):
         self.count += 1
         self.repo = self.root / f"checkout-{self.count}"
         self.git("clone", "--branch", "main", str(self.origin), str(self.repo), cwd=self.root)
         path = self.repo / "gradle.properties"
-        path.write_text(path.read_text().replace("30.0.100", "30.0.200"))
+        path.write_bytes(path.read_bytes().replace(b"30.0.100", b"30.0.200"))
 
     def execute(self, *args):
         if args[0] == "git":
-            return self.git(*args[1:])
+            return self.git(*args[1:], raw=True)
         self.assertEqual(args[0], "gh")
         if args[1:3] == ("pr", "list"):
             if self.pr:
@@ -183,6 +184,47 @@ class PublicationTest(unittest.TestCase):
         self.git("add", "unrelated.txt")
         with self.assertRaisesRegex(ValueError, "unrelated staged files"):
             self.publish()
+        self.assertEqual(self.creates, 0)
+
+    def test_unrelated_property_in_new_update_is_not_published(self):
+        path = self.repo / "gradle.properties"
+        path.write_text(path.read_text().replace("other.setting=unchanged", "other.setting=changed"))
+        with self.assertRaisesRegex(ValueError, "unrelated Gradle properties"):
+            self.publish()
+        self.assertEqual((self.creates, self.dispatches), (0, 0))
+
+    def test_new_update_cannot_add_blank_lines(self):
+        path = self.repo / "gradle.properties"
+        path.write_bytes(b"\n" + path.read_bytes() + b"\n")
+        with self.assertRaisesRegex(ValueError, "unrelated Gradle properties"):
+            self.publish()
+        self.assertEqual(self.creates, 0)
+
+    def test_new_update_cannot_convert_line_endings(self):
+        path = self.repo / "gradle.properties"
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        with self.assertRaisesRegex(ValueError, "unrelated Gradle properties"):
+            self.publish()
+        self.assertEqual(self.creates, 0)
+
+    def test_crlf_update_is_preserved_in_new_and_reused_branch(self):
+        path = self.seed / "gradle.properties"
+        path.write_bytes(PROPERTIES.replace("\n", "\r\n").encode())
+        self.git("add", "gradle.properties", cwd=self.seed)
+        self.git("commit", "-m", "use CRLF", cwd=self.seed)
+        self.git("push", "origin", "main", cwd=self.seed)
+        self.checkout()
+        self.publish()
+        published = self.git("show", f"{BRANCH}:gradle.properties", cwd=self.origin, raw=True)
+        self.assertEqual(published, PROPERTIES.replace("30.0.100", "30.0.200").replace("\n", "\r\n"))
+        self.checkout()
+        self.publish()
+        self.assertEqual((self.creates, self.dispatches), (1, 1))
+
+    def test_new_update_requires_report_to_match_original_pins(self):
+        report = {"branch": BRANCH, "changes": [{"property": "duckdetector.android.ndk", "from": "29.0.100", "to": "30.0.200"}]}
+        with self.assertRaisesRegex(ValueError, "checked-out base pins"):
+            self.publish(report)
         self.assertEqual(self.creates, 0)
 
     def test_wrong_staged_target_set_is_not_published(self):
