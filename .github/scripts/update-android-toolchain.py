@@ -44,6 +44,10 @@ def latest_packages(xml: bytes) -> dict[str, str]:
     root = ET.fromstring(xml)
     if root.tag.rsplit("}", 1)[-1] != "sdk-repository":
         raise ValueError("Expected an Android SDK repository document")
+    # SDK feeds normally qualify only the root. Also accept consistently
+    # namespaced child elements without silently finding zero packages.
+    for element in root.iter():
+        element.tag = element.tag.rsplit("}", 1)[-1]
     candidates: dict[str, list[str]] = {name: [] for name in PACKAGES.values()}
     for package in root.findall("remotePackage"):
         kind, separator, value = package.get("path", "").partition(";")
@@ -54,19 +58,24 @@ def latest_packages(xml: bytes) -> dict[str, str]:
         # Some NDK previews are published on channel-0 too. Both checks matter.
         if channel is not None and channel.get("ref") != "channel-0":
             continue
-        if revision is None or revision.find("preview") is not None:
+        if revision is None or int(revision.findtext("preview", "0")) != 0:
             continue
         if package.get("obsolete", "false").lower() == "true":
             continue
         archives = package.findall("archives/archive")
         if not any(
             archive.find("complete") is not None
+            and bool(archive.findtext("complete/url", "").strip())
             and archive.findtext("host-os", "linux") == "linux"
-            and archive.findtext("host-arch", "x86_64") in ("x86_64", "x86", "amd64")
+            and archive.findtext("host-arch", "x86_64") in ("x86_64", "amd64")
+            and archive.findtext("host-bits", "64") == "64"
             for archive in archives
         ):
             continue
-        version(value)  # Never carry unvalidated feed text into properties or PR bodies.
+        path_version = version(value)
+        revision_version = tuple(int(revision.findtext(part, "0")) for part in ("major", "minor", "micro"))
+        if path_version[:3] != revision_version:
+            raise ValueError(f"SDK package path and revision disagree: {kind};{value}")
         candidates[kind].append(value)
     latest = {}
     for kind, values in candidates.items():
@@ -76,17 +85,37 @@ def latest_packages(xml: bytes) -> dict[str, str]:
     return latest
 
 
-def update_properties(text: str, latest: dict[str, str]) -> tuple[str, list[dict[str, str]]]:
-    changes = []
-    for key, kind in PACKAGES.items():
-        pattern = re.compile(r"^(" + re.escape(key) + r"[ \t]*=[ \t]*)([^\s#]+)([ \t]*\r?)$", re.MULTILINE)
-        matches = list(pattern.finditer(text))
+def property_pattern(key: str) -> re.Pattern:
+    return re.compile(r"^(" + re.escape(key) + r"[ \t]*=[ \t]*)([^\s#]+)([ \t]*\r?)$", re.MULTILINE)
+
+
+def pinned_properties(text: str) -> dict[str, str]:
+    pins = {}
+    for key in PACKAGES:
+        matches = list(property_pattern(key).finditer(text))
         if len(matches) != 1:
             raise ValueError(f"Expected exactly one {key} property")
-        current = matches[0].group(2)
+        pins[key] = matches[0].group(2)
+        version(pins[key])
+    return pins
+
+
+def target_branch(text: str) -> str:
+    # Hash the complete final pin set, not just the delta. If a maintainer
+    # accepts one pin separately, the remaining updates still reuse the same PR.
+    targets = "\n".join(f"{key}={value}" for key, value in sorted(pinned_properties(text).items()))
+    digest = hashlib.sha256(targets.encode()).hexdigest()[:16]
+    return f"bot/android-toolchain-{digest}"
+
+
+def update_properties(text: str, latest: dict[str, str]) -> tuple[str, list[dict[str, str]]]:
+    changes = []
+    pins = pinned_properties(text)
+    for key, kind in PACKAGES.items():
+        current = pins[key]
         target = latest[kind]
         if version(target) > version(current):
-            text = pattern.sub(lambda match: match[1] + target + match[3], text)
+            text = property_pattern(key).sub(lambda match: match[1] + target + match[3], text)
             changes.append({"property": key, "from": current, "to": target})
     return text, changes
 
@@ -114,6 +143,11 @@ def main() -> None:
     parser.add_argument("--repository-xml", type=Path, help="Use an offline SDK repository fixture")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    # Reusing an output directory after an error/no-op must never expose an old
+    # report or PR body as if it belonged to the current invocation.
+    for name in ("report.json", "pr-body.md"):
+        (args.output_dir / name).unlink(missing_ok=True)
     if args.repository_xml:
         xml = args.repository_xml.read_bytes()
     else:
@@ -122,12 +156,9 @@ def main() -> None:
             xml = response.read()
     original = args.properties.read_bytes().decode("utf-8")
     updated, changes = update_properties(original, latest_packages(xml))
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     report = {"changes": changes, "branch": ""}
     if changes:
-        targets = "\n".join(f"{item['property']}={item['to']}" for item in changes)
-        digest = hashlib.sha256(targets.encode()).hexdigest()[:16]
-        report["branch"] = f"bot/android-toolchain-{digest}"
+        report["branch"] = target_branch(updated)
         (args.output_dir / "pr-body.md").write_text(pr_body(changes), encoding="utf-8")
         args.properties.write_bytes(updated.encode("utf-8"))
     (args.output_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

@@ -2,7 +2,10 @@
 
 GitHub's native Dependabot checks the Gradle builds (including
 `gradle/libs.versions.toml`, plugins and the Gradle wrapper) and the SHA-pinned
-GitHub Actions. Related Kotlin/AGP changes are grouped together; other library
+GitHub Actions, including the local Android build composite action. The root
+Gradle entry discovers the included `build-logic` build; the SDK consumer sample
+shares the root catalog and has no independently published dependency to update.
+Related Kotlin/AGP changes are grouped together; other library
 minor/patch updates and Actions updates are grouped to reduce PR noise.
 Major library upgrades remain separate for compatibility review.
 
@@ -12,7 +15,10 @@ and Android Build Tools pins in `gradle.properties` against Google's official
 SDK repository. It filters out preview revisions, non-stable channels,
 obsolete packages and packages without a Linux archive. This matters because
 Google's feed can publish NDK previews even on the stable channel.
-The updater never downgrades a pin. Errors fail the job without publishing a PR.
+Package path versions must match the SDK revision metadata, and a complete
+archive URL must exist for the 64-bit Linux runner. The updater never downgrades
+a pin. Feed/property errors fail the job before PR publication, and stale report
+artifacts are removed on subsequent invocations.
 
 Both configurations run at 00:37 UTC (08:37 Asia/Singapore) on calendar days
 1, 4, 7, 10, ... of each month. GitHub Dependabot's native cron schedule resets
@@ -27,12 +33,22 @@ scheduled workflow becomes eligible to run. For the Android workflow, enable
 create and approve pull requests** if it is disabled. The workflow does not
 approve or merge PRs; this setting is GitHub's permission gate for creating them.
 
-Each Android toolchain target set gets a deterministic `bot/android-toolchain-*`
-branch. Repeated runs do not duplicate open or closed PRs for that target set.
-Published branches are never force-pushed. The workflow explicitly dispatches
-the existing secret-free `ci.yml` on a new PR branch using `GITHUB_TOKEN`, so a
+Each complete final Android toolchain pin set gets a deterministic
+`bot/android-toolchain-*` branch, even when only some updates remain after a
+partial merge. Repeated runs do not duplicate open or closed PRs for that set.
+Published branches are never force-pushed. Existing/orphan branches are checked
+against their merge base: only the three owned properties may change, without
+downgrades, and the complete target set must match the branch name. Unrelated
+staged files are rejected before publishing a new branch.
+
+The workflow explicitly dispatches the existing secret-free `ci.yml` on a new
+PR branch using `GITHUB_TOKEN`, so a
 PAT is not needed to start build verification. Automatic PR-event CI may also
 require GitHub's approval; this explicit dispatch is the build verification path.
+If publication stops after pushing a branch or creating a PR, the next run
+resumes from that state and dispatches CI if no explicit dispatch exists for
+the current commit. A failed CI run already exists for that commit and is left
+for maintainer review rather than automatically rerun indefinitely.
 
 The bots propose changes for review and do not merge automatically. SDK API
 levels (`compileSdk`, `targetSdk`, `minSdk`, minor SDK level and suppression
@@ -45,10 +61,11 @@ so CI and local builds stay aligned.
 
 ```sh
 python3 .github/scripts/test-android-toolchain-updates.py
+python3 .github/scripts/test-android-toolchain-publication.py
 python3 .github/scripts/update-android-toolchain.py --output-dir /tmp/android-toolchain-update
 ```
 
-The second command writes available updates to `gradle.properties` and produces
+The final command writes available updates to `gradle.properties` and produces
 a JSON report and PR body. Use `--properties /tmp/gradle.properties` with a copy
 of the file to inspect live updates without changing the checkout, or pass
 `--repository-xml <fixture.xml>` for an offline run.

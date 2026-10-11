@@ -30,8 +30,9 @@ SPEC.loader.exec_module(UPDATER)
 
 
 def package(kind, value, *, channel="channel-0", preview=False, obsolete=False, host="linux", arch="x86_64"):
+    parts = (value.split(".") + ["0", "0"])[:3]
     return f"""<remotePackage path="{kind};{value}" obsolete="{str(obsolete).lower()}">
-      <revision><major>30</major>{'<preview>1</preview>' if preview else ''}</revision>
+      <revision><major>{parts[0]}</major><minor>{parts[1]}</minor><micro>{parts[2]}</micro>{'<preview>1</preview>' if preview else ''}</revision>
       <channelRef ref="{channel}"/>
       <archives><archive><complete><url>tool.zip</url></complete>
       <host-os>{host}</host-os><host-arch>{arch}</host-arch></archive></archives>
@@ -63,7 +64,7 @@ class AndroidToolchainUpdatesTest(unittest.TestCase):
         self.assertEqual(latest["ndk"], "30.0.200")
 
     def test_filters_unusable_packages(self):
-        for options in ({"channel": "channel-1"}, {"obsolete": True}, {"host": "windows"}, {"arch": "aarch64"}):
+        for options in ({"channel": "channel-1"}, {"obsolete": True}, {"host": "windows"}, {"arch": "aarch64"}, {"arch": "x86"}):
             with self.subTest(options=options):
                 latest = UPDATER.latest_packages(feed(package("ndk", "31.0.999", **options)))
                 self.assertEqual(latest["ndk"], "30.0.200")
@@ -80,6 +81,21 @@ class AndroidToolchainUpdatesTest(unittest.TestCase):
     def test_untrusted_version_is_rejected(self):
         with self.assertRaises(ValueError):
             UPDATER.latest_packages(feed(package("ndk", "31.0.invalid")))
+
+    def test_namespaced_children_and_explicit_zero_preview(self):
+        xml = feed().decode().replace('xmlns:sdk=', 'xmlns="urn:android-sdk" xmlns:sdk=')
+        xml = xml.replace('</revision>', '<preview>0</preview></revision>')
+        self.assertEqual(UPDATER.latest_packages(xml.encode())["ndk"], "30.0.200")
+
+    def test_revision_must_match_package_path(self):
+        wrong = package("ndk", "31.0.300").replace('<major>31</major>', '<major>30</major>')
+        with self.assertRaisesRegex(ValueError, "path and revision disagree"):
+            UPDATER.latest_packages(feed(wrong))
+
+    def test_missing_archive_url_and_32_bit_host_are_not_candidates(self):
+        for candidate in (package("ndk", "31.0.300").replace('<url>tool.zip</url>', ''),
+                          package("ndk", "31.0.300").replace('</archive>', '<host-bits>32</host-bits></archive>')):
+            self.assertEqual(UPDATER.latest_packages(feed(candidate))["ndk"], "30.0.200")
 
     def test_only_tool_pins_change(self):
         updated, changes = UPDATER.update_properties(PROPERTIES, UPDATER.latest_packages(feed()))
@@ -105,6 +121,14 @@ class AndroidToolchainUpdatesTest(unittest.TestCase):
         updated, _ = UPDATER.update_properties(text, UPDATER.latest_packages(feed()))
         self.assertEqual(updated, text.replace("30.0.100", "30.0.200"))
 
+    def test_partial_merge_does_not_create_a_different_target_branch(self):
+        latest = {"ndk": "30.0.200", "cmake": "4.2.0", "build-tools": "37.0.0"}
+        both, changes = UPDATER.update_properties(PROPERTIES, latest)
+        partial, remaining = UPDATER.update_properties(PROPERTIES.replace("30.0.100", "30.0.200"), latest)
+        self.assertEqual((len(changes), len(remaining)), (2, 1))
+        self.assertEqual(UPDATER.target_branch(both), UPDATER.target_branch(partial))
+        self.assertEqual(UPDATER.target_branch(both), UPDATER.target_branch(both + '# unrelated comment\n'))
+
     def run_updater(self, properties, xml, output):
         return subprocess.run([sys.executable, str(SCRIPT), "--properties", str(properties),
                                "--repository-xml", str(xml), "--output-dir", str(output)],
@@ -124,6 +148,7 @@ class AndroidToolchainUpdatesTest(unittest.TestCase):
             result = self.run_updater(props, xml, output)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(UPDATER.json.loads((output / "report.json").read_text())["branch"], "")
+            self.assertFalse((output / "pr-body.md").exists())
 
     def test_cli_error_keeps_properties_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -132,10 +157,15 @@ class AndroidToolchainUpdatesTest(unittest.TestCase):
             props.write_text(PROPERTIES.replace("duckdetector.android.cmake=4.1.2\n", ""))
             original = props.read_bytes()
             xml.write_bytes(feed())
+            output = root / "output"
+            output.mkdir()
+            (output / "report.json").write_text('stale report')
+            (output / "pr-body.md").write_text('stale body')
             result = self.run_updater(props, xml, root / "output")
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(props.read_bytes(), original)
             self.assertFalse((root / "output" / "report.json").exists())
+            self.assertFalse((root / "output" / "pr-body.md").exists())
 
 
 if __name__ == "__main__":
