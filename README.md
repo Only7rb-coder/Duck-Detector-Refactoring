@@ -61,9 +61,13 @@ To see what a detector looks for and why that counts as evidence, open its evide
 
 Current feature areas, each linked to its evidence record, which explains what the detector looks for, why that counts as evidence, and what it cannot see:
 
-[`Bootloader`](./feature/bootloader/EVIDENCE.md) · [`Custom ROM`](./feature/customrom/EVIDENCE.md) · [`Dangerous Apps`](./feature/dangerousapps/EVIDENCE.md) · [`Kernel Check`](./feature/kernelcheck/EVIDENCE.md) · [`LSPosed`](./feature/lsposed/EVIDENCE.md) · [`Memory`](./feature/memory/EVIDENCE.md) · [`Mount`](./feature/mount/EVIDENCE.md) · [`Native Root`](./feature/nativeroot/EVIDENCE.md) · [`Play Integrity Fix`](./feature/playintegrityfix/EVIDENCE.md) · [`SELinux`](./feature/selinux/EVIDENCE.md) · [`SU`](./feature/su/EVIDENCE.md) · [`System Properties`](./feature/systemproperties/EVIDENCE.md) · [`TEE`](./feature/tee/EVIDENCE.md) · [`Virtualization`](./feature/virtualization/EVIDENCE.md) · [`Zygisk`](./feature/zygisk/EVIDENCE.md)
+[`ADB Runtime`](./feature/adbruntime/EVIDENCE.md) · [`Bootloader`](./feature/bootloader/EVIDENCE.md) · [`Custom ROM`](./feature/customrom/EVIDENCE.md) · [`Dangerous Apps`](./feature/dangerousapps/EVIDENCE.md) · [`Kernel Check`](./feature/kernelcheck/EVIDENCE.md) · [`LSPosed`](./feature/lsposed/EVIDENCE.md) · [`Memory`](./feature/memory/EVIDENCE.md) · [`Mount`](./feature/mount/EVIDENCE.md) · [`Native Root`](./feature/nativeroot/EVIDENCE.md) · [`Play Integrity Fix`](./feature/playintegrityfix/EVIDENCE.md) · [`Root Managers`](./feature/rootmanagers/EVIDENCE.md) · [`SELinux`](./feature/selinux/EVIDENCE.md) · [`SU`](./feature/su/EVIDENCE.md) · [`System Properties`](./feature/systemproperties/EVIDENCE.md) · [`TEE`](./feature/tee/EVIDENCE.md) · [`Virtualization`](./feature/virtualization/EVIDENCE.md) · [`Zygisk`](./feature/zygisk/EVIDENCE.md)
+
+The SELinux area also retains an app-zygote SID-table query/registration experiment. Repeated discrepancies are supporting warnings; synchronized policy hiding can leave no discrepancy. Controlled privileged-context writes run in a disposable child with malformed/stock controls; recognition and ordinary-app timing are supporting warnings, an app-zygote AVC lookup-count profile is informational only, and negative observations cannot exclude hidden policy. Access failures and incomplete experiments remain explicit coverage states. See the [SELinux evidence record](./feature/selinux/EVIDENCE.md) for source references and device-validation limits.
 
 `Play Integrity Fix` refers to local indicators associated with integrity-spoofing modifications; DuckDetector does not return an official Google Play Integrity API verdict. The TEE area evaluates Android KeyStore and attestation evidence, including certificate chains, security levels, revocation data, and selected KeyMint, StrongBox, and Soter behavior where supported.
+
+Native Root also offers an optional [fsnotify SRCU timing experiment](feature/nativeroot/SRCU_TIMING.md), disabled by default. It requires an explicit choice, uses a temporary private dynamic permission on supported Android 12–14 systems, and reports repeatable contention as supporting evidence. Its thresholds await device calibration; it does not identify KernelSU, and its private-process deadline cannot recover a blocked kernel.
 
 Supporting modules provide the dashboard, device information, settings, update checks, notifications, license information, and common UI infrastructure.
 
@@ -170,7 +174,7 @@ The same build also produces the headless SDK as one AAR, without any UI, publis
 
 Every [Stable release](https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest) and the [Nightly release](https://github.com/eltavine/Duck-Detector-Refactoring/releases/tag/nightly) include the SDK AAR alongside the APK.
 
-Before contributing, read [`CODING_STANDARDS.md`](./CODING_STANDARDS.md).
+Before contributing, read [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CODING_STANDARDS.md`](./CODING_STANDARDS.md).
 
 ## Release signing
 

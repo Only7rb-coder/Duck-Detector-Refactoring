@@ -34,9 +34,20 @@ fun SelinuxReport.toDetectorStatus(): DetectorStatus {
                 auditIntegrity?.state == SelinuxAuditIntegrityState.TAMPERED -> DetectorStatus.danger()
                 contextValidity?.contextValidity?.verdict == SelinuxContextValidityVerdict.KSU_PRESENT -> DetectorStatus.danger()
                 policyloadSeqno?.isSecure == false -> DetectorStatus.danger()
-                procAttrCurrent?.isSecure == false -> DetectorStatus.danger()
+                methods.any { it.oracle == SelinuxOracle.STATUS_MMAP_ABI && it.isSecure == false } -> DetectorStatus.danger()
+                // EN: Please fucking do NOT downgrade this to WARNING. I reproduced the
+                // ordinary-app A/B timing gap (~1 us) with Hide ON/OFF/ON controls and
+                // verified the extra pre-denial parsing path. DANGER means strong evidence
+                // of this observable anomaly, NOT universal proof of KernelSU or root.
+                // 中文：他妈的请不要把它改回 WARNING！我用 Hide 开/关/开对照稳定复现了
+                // 约 1 微秒的 A/B 时序差异，并验证了拒绝前的额外解析路径。
+                // DANGER 表示强异常证据，不代表仅凭侧信道就能在所有设备上确认 KernelSU 或 Root。
+                methods.any { it.oracle == SelinuxOracle.ATTR_CURRENT_TIMING && it.isSecure == false } -> DetectorStatus.danger()
+                procAttrCurrent?.isSecure == false -> DetectorStatus.warning()
                 dirtyPolicyHit != null -> DetectorStatus.warning()
                 appZygoteCarrierState == AppZygoteCarrierSupportState.UNTRUSTED -> DetectorStatus.warning()
+                // After the trusted oracle and carrier checks; before the info-level coverage state, which would mask it.
+                sidtabReading(this)?.verdict == SelinuxSidtabVerdict.DISCREPANCY_OBSERVED -> DetectorStatus.warning()
                 appZygoteCarrierState == AppZygoteCarrierSupportState.FAILED -> DetectorStatus.info(InfoKind.SUPPORT)
                 contextValidity?.contextValidity?.verdict == SelinuxContextValidityVerdict.SELF_TEST_FAILED -> DetectorStatus.warning()
                 contextValidity?.contextValidity?.verdict == SelinuxContextValidityVerdict.AMBIGUOUS -> DetectorStatus.warning()

@@ -23,14 +23,19 @@ import com.eltavine.duckdetector.features.selinux.domain.AppZygoteCarrierSupport
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxAuditIntegrityState
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxContextValidityVerdict
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxMode
+import com.eltavine.duckdetector.features.selinux.domain.SelinuxOracle
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxPolicyWeakness
+import com.eltavine.duckdetector.features.selinux.domain.SelinuxProcAttrCurrentVerdict
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxReport
+import com.eltavine.duckdetector.features.selinux.domain.SelinuxSidtabVerdict
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxStage
+import com.eltavine.duckdetector.features.selinux.domain.avcLookupReading
 import com.eltavine.duckdetector.features.selinux.domain.contextValidityResult
 import com.eltavine.duckdetector.features.selinux.domain.contextValiditySupportState
 import com.eltavine.duckdetector.features.selinux.domain.firstTrustedPolicyRuleHit
 import com.eltavine.duckdetector.features.selinux.domain.policyloadSeqnoResult
 import com.eltavine.duckdetector.features.selinux.domain.procAttrCurrentResult
+import com.eltavine.duckdetector.features.selinux.domain.sidtabReading
 import com.eltavine.duckdetector.features.selinux.presentation.model.SelinuxImpactItemModel
 
 internal fun buildImpactItems(report: SelinuxReport): List<SelinuxImpactItemModel> {
@@ -199,23 +204,39 @@ internal fun buildImpactItems(report: SelinuxReport): List<SelinuxImpactItemMode
     }
     when {
         procAttrCurrent?.isSecure == false -> items += SelinuxImpactItemModel(
-            "The dedicated app_zygote carrier observed anomalous /proc/self/attr/current writes for ${procAttrCurrent.attrCurrentDetections.joinToString()}.",
-            DetectorStatus.danger(),
+            "Controlled attr/current writes repeatedly recognized contexts for ${procAttrCurrent.attrCurrentDetections.joinToString()}. This supports a policy observation; it does not identify a root tool.",
+            DetectorStatus.warning(),
         )
 
-        procAttrCurrent?.isSecure == true -> items += SelinuxImpactItemModel(
-            "The dedicated app_zygote carrier rejected the tested privileged contexts with normal EINVAL results.",
-            DetectorStatus.allClear(),
-        )
-
-        procAttrCurrent != null -> items += SelinuxImpactItemModel(
-            procAttrCurrent.details ?: "The dedicated app_zygote attr/current write probe stayed unavailable.",
+        procAttrCurrent?.attrCurrentVerdict == SelinuxProcAttrCurrentVerdict.NOT_RECOGNIZED -> items += SelinuxImpactItemModel(
+            "Controlled app_zygote attr/current writes did not recognize the tested privileged contexts. A hidden backup policy can produce the same EINVAL results.",
             DetectorStatus.info(InfoKind.SUPPORT),
         )
+
+        // Not details: the raw per-write record belongs in the method row, not an impact line.
+        procAttrCurrent != null -> items += SelinuxImpactItemModel(
+            "Controlled app_zygote attr/current writes: ${procAttrCurrent.status}. This is a coverage gap, not a clean result.",
+            DetectorStatus.info(InfoKind.SUPPORT),
+        )
+    }
+    if (report.methods.any { it.oracle == SelinuxOracle.ATTR_CURRENT_TIMING && it.isSecure == false }) {
+        items += SelinuxImpactItemModel(
+            "Repeatable attr/current timing asymmetry is strong device-side evidence of extra context processing before access denial. This device-dependent side channel alone does not identify a root tool.",
+            DetectorStatus.danger(),
+        )
+    }
+    if (avcLookupReading(report)?.extraLookupObserved == true) {
+        items += SelinuxImpactItemModel(AVC_EXTRA_LOOKUP_IMPACT, DetectorStatus.info(InfoKind.SUPPORT))
     }
     if (dirtyPolicyHit != null) {
         items += SelinuxImpactItemModel(
             trustedPolicyRuleImpact(dirtyPolicyHit),
+            DetectorStatus.warning(),
+        )
+    }
+    if (sidtabReading(report)?.verdict == SelinuxSidtabVerdict.DISCREPANCY_OBSERVED) {
+        items += SelinuxImpactItemModel(
+            "The app_zygote SID-table experiment twice saw accepted context queries leave the live SID-table count unchanged and rejected attr/current writes increase it. This is supporting evidence, not tool identification or root proof.",
             DetectorStatus.warning(),
         )
     }

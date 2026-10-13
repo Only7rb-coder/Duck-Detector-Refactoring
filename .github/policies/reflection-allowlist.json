@@ -75,6 +75,13 @@
       "reason": "Reads the hidden framework fields named by custom ROM signatures; the presence of those fields is the evidence."
     },
     {
+      "path": "feature/heapresidue/data/src/main/kotlin/com/eltavine/duckdetector/features/heapresidue/data/ipc/IsolatedHeapDumpService.kt",
+      "uses": [
+        "operations"
+      ],
+      "reason": "Invokes only the hidden Debug.dumpHprofData(String, FileDescriptor) overload in the isolated VM without adding process-wide hidden API exemptions."
+    },
+    {
       "path": "feature/lsposed/data/src/main/kotlin/com/eltavine/duckdetector/features/lsposed/data/probes/LSPosedBridgeFieldProbe.kt",
       "uses": [
         "operations",
@@ -131,6 +138,13 @@
         "operations"
       ],
       "reason": "Exercises the reflective method gateway against fake service methods."
+    },
+    {
+      "path": "feature/rootmanagers/data/src/main/kotlin/com/eltavine/duckdetector/features/rootmanagers/data/probes/HiddenZygotePreloadField.kt",
+      "uses": [
+        "operations"
+      ],
+      "reason": "Reads the hidden ApplicationInfo.zygotePreloadName field, which is absent from the SDK, through HiddenApiBypass.getInstanceFields so a manager's zygote preload name can match; it adds no process-wide hidden-api exemption, so other detectors keep observing the default policy."
     },
     {
       "path": "feature/tee/data/src/main/kotlin/com/eltavine/duckdetector/features/tee/data/verification/keystore/KeyMintCapabilityProbe.kt",

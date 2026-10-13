@@ -18,15 +18,18 @@
 package com.eltavine.duckdetector.sdk
 
 import com.eltavine.duckdetector.core.detector.Detector
+import com.eltavine.duckdetector.features.adbruntime.detector.AdbRuntimeDetector
 import com.eltavine.duckdetector.features.bootloader.detector.BootloaderDetector
 import com.eltavine.duckdetector.features.customrom.detector.CustomRomDetector
 import com.eltavine.duckdetector.features.dangerousapps.detector.DangerousAppsDetector
+import com.eltavine.duckdetector.features.heapresidue.detector.HeapResidueDetector
 import com.eltavine.duckdetector.features.kernelcheck.detector.KernelCheckDetector
 import com.eltavine.duckdetector.features.lsposed.detector.LSPosedDetector
 import com.eltavine.duckdetector.features.memory.detector.MemoryDetector
 import com.eltavine.duckdetector.features.mount.detector.MountDetector
 import com.eltavine.duckdetector.features.nativeroot.detector.NativeRootDetector
 import com.eltavine.duckdetector.features.playintegrityfix.detector.PlayIntegrityFixDetector
+import com.eltavine.duckdetector.features.rootmanagers.detector.RootManagersDetector
 import com.eltavine.duckdetector.features.selinux.detector.SelinuxDetector
 import com.eltavine.duckdetector.features.su.detector.SuDetector
 import com.eltavine.duckdetector.features.systemproperties.detector.SystemPropertiesDetector
@@ -46,14 +49,17 @@ public object DetectorCatalog {
     public val all: List<Detector<*, *>> = listOf(
         BootloaderDetector,
         TeeDetector,
+        AdbRuntimeDetector,
         CustomRomDetector,
         DangerousAppsDetector,
+        HeapResidueDetector,
         KernelCheckDetector,
         LSPosedDetector,
         MemoryDetector,
         MountDetector,
         NativeRootDetector,
         PlayIntegrityFixDetector,
+        RootManagersDetector,
         SelinuxDetector,
         SuDetector,
         SystemPropertiesDetector,

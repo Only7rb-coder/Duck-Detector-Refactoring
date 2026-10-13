@@ -22,7 +22,39 @@ enum class SelinuxOracle(val label: String) {
     CONTEXT_VALIDITY("Context validity oracle"),
     PROC_ATTR_CURRENT_WRITE("app_zygote attr/current write"),
     POLICYLOAD_SEQNO("App-zygote seqno oracle"),
+    SIDTAB_CONSISTENCY("SID-table query consistency"),
+    ATTR_CURRENT_TIMING("SELinux Hide attr/current timing (experimental)"),
+    APP_ZYGOTE_AVC_LOOKUPS("App Zygote AVC lookup profile (experimental)"),
+    STATUS_MMAP_ABI("Status mmap ABI conformance"),
 }
+
+/** The status node mmap/mprotect requests the conformance probe sends; [label] is the report text. */
+enum class SelinuxStatusAbiRequest(val label: String) {
+    TWO_PAGE_SHARED("2-page shared mmap"),
+    OFFSET_SHARED("mmap at page offset 1"),
+    WRITABLE_PRIVATE("writable private mmap"),
+    MPROTECT_WRITE("mprotect to writable"),
+}
+
+/**
+ * The status mmap ABI oracle's verdict; [label] is the status it is shown with. Only
+ * [ABI_VIOLATION] is evidence: the others, including [NO_VIOLATION], cannot exclude a hidden
+ * handler because a hook that keeps the upstream checks answers like stock.
+ */
+enum class SelinuxStatusAbiVerdict(val label: String) {
+    ABI_VIOLATION("ABI violation"),
+    NO_VIOLATION("No violation observed"),
+    UNAVAILABLE("Unavailable"),
+    INCONCLUSIVE("Inconclusive"),
+}
+
+/** The status mmap ABI oracle's verdict and the requests the status node granted. */
+data class SelinuxStatusAbiReading(
+    val verdict: SelinuxStatusAbiVerdict,
+    val violatedRequests: List<SelinuxStatusAbiRequest> = emptyList(),
+    val pageSize: Long? = null,
+    val notes: List<String> = emptyList(),
+)
 
 /** The context validity oracle's reading of the two KSU-specific contexts; [label] is the status it is shown with. */
 enum class SelinuxContextValidityVerdict(val label: String) {
@@ -44,9 +76,18 @@ data class SelinuxContextValidityReading(
     val repeatabilityFailed: Boolean = false,
 )
 
-object SelinuxProcAttrCurrentLabels {
-    const val STATUS_CLEAN = "Normal EINVAL"
-    const val STATUS_UNSUPPORTED = "Unsupported"
+/**
+ * The controlled app_zygote attr/current probe's reading; [label] is the status it is shown with.
+ * Only [CONTEXT_RECOGNIZED] is evidence: the others, including [NOT_RECOGNIZED], cannot exclude a
+ * hidden policy.
+ */
+enum class SelinuxProcAttrCurrentVerdict(val label: String) {
+    CONTEXT_RECOGNIZED("Context recognized"),
+    NOT_RECOGNIZED("Tested contexts not recognized"),
+    PERMISSION_LIMITED("Permission limited"),
+    UNSUPPORTED("Unsupported"),
+    UNAVAILABLE("Unavailable"),
+    INCONCLUSIVE("Inconclusive"),
 }
 
 object SelinuxPolicyloadSeqnoLabels {

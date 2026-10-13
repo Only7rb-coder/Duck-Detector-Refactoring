@@ -61,7 +61,29 @@ jobs:
           python3 .github/scripts/test-release-tools.py
           python3 .github/scripts/test-source-file-length.py
           python3 .github/scripts/test-text-protocols.py
+          python3 .github/scripts/test-android-toolchain-updates.py
+          python3 .github/scripts/test-android-toolchain-publication.py
           python3 scripts/test_new_detector.py
+
+      - name: Test SELinux native parsing and experiment control flow
+        run: |
+          python3 capability/selinuxpolicy/data/src/test/python/test_sidtab_native.py
+          python3 capability/selinuxpolicy/data/src/test/python/test_proc_attr_native.py
+          python3 capability/selinuxpolicy/data/src/test/python/test_avc_lookup_native.py
+          python3 capability/selinuxpolicy/data/src/test/python/test_status_abi_native.py
+
+      # Research tools pin the upstream inputs behind a detector's evidence record. Their
+      # self-tests are offline; the network audit stays an explicit manual step.
+      - name: Self-test detector research tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for suite in feature/*/research/*/; do
+            # unittest exits non-zero when it finds no tests, so skip suites without any.
+            compgen -G "${suite}test_*.py" > /dev/null || continue
+            python3 -m unittest discover -s "$suite" -p 'test_*.py'
+          done
 
       - name: Verify every detector stays inside its own directory
         run: python3 .github/scripts/check-detector-touch-points.py
@@ -228,7 +250,7 @@ jobs:
 
       - name: Upload test and lint reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verify-reports
           path: |

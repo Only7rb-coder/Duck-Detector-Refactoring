@@ -5,5 +5,16 @@ duckdetector_native_unit(duckdetector_selinuxpolicy
     context_validity_native_bridge.cpp
     dirty_policy_probe.cpp
     selinux_status_page_native_bridge.cpp
+    sidtab_probe.cpp
+    sidtab_probe_io.cpp
+    sidtab_native_bridge.cpp
+    proc_attr_probe.cpp
+    proc_attr_io.cpp
+    proc_attr_native_bridge.cpp
+    avc_lookup_probe.cpp
+    avc_lookup_io.cpp
+    avc_lookup_native_bridge.cpp
     selinux_status_page_probe.cpp
+    selinux_status_abi_probe.cpp
+    selinux_status_abi_native_bridge.cpp
 )

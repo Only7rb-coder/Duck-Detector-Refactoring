@@ -108,6 +108,8 @@ public data class SelinuxContextValiditySnapshot(
     val procAttrCurrentProbeAttempted: Boolean = false,
     val procAttrCurrentResults: List<SelinuxProcAttrCurrentResult> = emptyList(),
     val procAttrCurrentFailureReason: String? = null,
+    val avcLookup: SelinuxAvcLookupSnapshot = SelinuxAvcLookupSnapshot(),
+    val statusAbi: SelinuxStatusAbiSnapshot = SelinuxStatusAbiSnapshot(),
     val failureReason: String? = null,
     val notes: List<String> = emptyList(),
     /**
@@ -116,6 +118,7 @@ public data class SelinuxContextValiditySnapshot(
      * the same information in the wording the report shows.
      */
     val collection: NativeCollectionStatus = NativeCollectionStatus.Collected,
+    val sidtab: SelinuxSidtabSnapshot = SelinuxSidtabSnapshot(),
 ) {
     /**
      * Whether the native dirty-policy access oracle passed its own checks: it ran in the expected
