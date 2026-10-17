@@ -128,7 +128,9 @@ permission-limited/unavailable states; their absence cannot establish that no ap
   semantic evidence. Two target timeouts with three successful local controls produce a separate
   lower-confidence timing warning, never proof that callbacks were permanently dropped or that a
   particular module exists. A single timeout, failed control, denial, decoding failure or interrupted
-  pair cannot produce this warning. Callback-intent preservation additionally checks call correlation;
+  pair cannot produce this warning. Batch deadline exhaustion remains an explicit partial-coverage
+  result even before the first pair completes; failed control fields remain visible separately from
+  target failures. Callback-intent preservation additionally checks call correlation;
   intent replacement or a mismatched per-call token is a semantic difference. Expected intent fields
   are copied before submission so mutation of the submitted object does not alter the baseline.
 - False positives and visibility limits: load, scheduling, freezing, OEM policy and transient system
@@ -165,8 +167,11 @@ permission-limited/unavailable states; their absence cannot establish that no ap
   package identity. A completed scan only covers the stated user/range at sampling time. Seccomp,
   namespaces and kernel filtering can hide tasks; no absent task means no installed package.
 - Result states: consistent, inconsistent, inconclusive, partial, permission limited, unavailable,
-  unsupported. UID-only mismatches are warnings and never add a named hidden package or red HMA alert. A completed
-  scan that omits the live caller UID invalidates the comparison.
+  unsupported. UID-only mismatches are warnings and never add a named hidden package or red HMA alert.
+  A completed scan must observe the live caller. A partial scan that visited the caller's UID but
+  omitted it also invalidates the comparison.
+  A partial scan that has not reached that UID remains partial; its start UID and visited count are
+  retained so callers in secondary Android users receive the same control semantics.
 
 ### Validation coverage
 
@@ -238,7 +243,7 @@ The context bootstrap instrumented test and MainActivity cold-launch smoke check
 The runtime harness uses AndroidX Test Runner 1.7.0 with the existing JUnit extension 1.3.0;
 [runner documentation](https://developer.android.com/training/testing/instrumented-tests/androidx-test-libraries/runner)
 and [release notes](https://developer.android.com/jetpack/androidx/releases/test) establish the
-runtime dependency. Thirty-seven new JVM tests cover the exception, callback, UID policy, native framing and presentation rules.
+runtime dependency. Forty-one new JVM tests cover the exception, callback, UID policy, native framing and presentation rules.
 
 
 The following validation commands passed with the repository-pinned uihelper revision
@@ -272,6 +277,28 @@ UID; caller controls passed and no recheck failed or reached its limit. The resu
 session was stopped after testing without saving a snapshot.
 
 The revised sources passed the full unit/app/lint/buildHealth/SDK command above, the standalone SDK
-consumer build and all repository guards. The 37 HMA regression tests passed. Device coverage for
-oss-164 callback omission, oss-173 wrong final flags, newer fixed builds and enforced seccomp refusal
+consumer build and all repository guards. These emulator observations apply to commit
+`3db22f0a0dc3b94411320c786f17173b38a79a47`; current JVM coverage includes 41 HMA tests. Device coverage
+for oss-164 callback omission, oss-173 wrong final flags, newer fixed builds and enforced seccomp refusal
 remains open; PJX110 observations above apply to the earlier implementation.
+
+#### Partial-coverage control regression
+
+The live-caller invariant also applies inside a visited prefix: native collection increments `checked`
+for each consecutive UID starting at the recorded first UID, including ESRCH outcomes. If that
+prefix contains the live caller but no caller task is reported, foreign UID claims are suppressed
+as inconclusive. If the prefix ends before the caller, no omitted-caller contradiction is inferred.
+Tests cover the exact boundary and a secondary Android user range. These are collection controls,
+not an additional independent HMA signal.
+
+Callback batch exhaustion before any complete target/control pair now reports partial coverage;
+it cannot become a missing-callback finding. Control fields and the batch-deadline flag distinguish
+this from callback denial or failure. The earlier emulator observations above predate these reducer
+refinements; no new physical-device run was available for this revision. The four added regressions
+failed before the fixes and passed afterward. Validation for these refinements uses:
+
+```sh
+./gradlew unitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :sdk:aar:publish :sdk:aar:verifySdkAar
+./gradlew -p samples/sdk-consumer assembleDebug
+for s in .github/scripts/check-*.py; do python3 "$s" || exit 1; done
+```

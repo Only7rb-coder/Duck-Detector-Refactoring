@@ -20,6 +20,7 @@ package com.eltavine.duckdetector.features.dangerousapps.domain
 data class HmaUidVisibilityObservation(
     val complete: Boolean,
     val checked: Int,
+    val firstUid: Int,
     val taskUids: Set<Int>,
     val callerUid: Int,
     val callerAssociationBefore: Boolean,
@@ -31,9 +32,10 @@ data class HmaUidVisibilityObservation(
 
 object HmaUidVisibilityPolicy {
     fun evaluate(observation: HmaUidVisibilityObservation): HmaBehaviorCheck = with(observation) {
-        // A live caller must appear in a completed same-user scan. A contradiction invalidates it.
+        // The caller stays alive during collection, including any partial prefix that reached it.
+        val callerWasQueried = callerUid >= firstUid && callerUid.toLong() < firstUid.toLong() + checked
         val controlsPassed = callerAssociationBefore && callerAssociationAfter &&
-            (!complete || callerUid in taskUids)
+            (!(complete || callerWasQueried) || callerUid in taskUids)
         val state = when {
             !controlsPassed -> HmaCheckState.INCONCLUSIVE
             unassociated.isNotEmpty() -> HmaCheckState.INCONSISTENT
@@ -44,7 +46,8 @@ object HmaUidVisibilityPolicy {
         HmaBehaviorCheck(HmaCheckKind.UID_TASK_VISIBILITY, state,
             "$checked/10000 ordinary app UIDs queried for this Android user; ${taskUids.size} task UID(s), " +
                 "${unassociated.size} repeatedly lacked a visible package association. " +
-                "Controls passed=$controlsPassed; recheck failure=$verificationFailed; recheck limit=$verificationLimitReached. " +
+                "First UID=$firstUid; caller queried=$callerWasQueried; controls passed=$controlsPassed; " +
+                "recheck failure=$verificationFailed; recheck limit=$verificationLimitReached. " +
                 "This does not identify a hidden package or HMA.",
             uids = if (controlsPassed) unassociated else emptyList())
     }

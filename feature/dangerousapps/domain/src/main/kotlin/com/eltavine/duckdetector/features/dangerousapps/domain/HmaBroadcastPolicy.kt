@@ -33,11 +33,12 @@ object HmaBroadcastPolicy {
         initialControl: HmaCallbackObservation,
         observations: List<HmaCallbackComparison>,
         expectedCount: Int,
+        budgetExpired: Boolean = false,
     ): List<HmaBehaviorCheck> {
         val kinds = listOf(HmaCheckKind.BROADCAST_RESULT_COMPLETION, HmaCheckKind.BROADCAST_RESULT_TO)
         if (!initialControl.consistent) return kinds.map {
             HmaBehaviorCheck(it, failureState(listOf(initialControl)),
-                "Initial caller-package callback control failed (${initialControl.failure}); target calls were skipped.")
+                "Initial caller-package callback control failed (${initialControl.controlDetail()}); target calls were skipped.")
         }
         val controlled = observations.filter { it.controlsPassed }
         val semanticMismatches = controlled.filter {
@@ -50,7 +51,7 @@ object HmaBroadcastPolicy {
         val controls = observations.flatMap { listOf(it.before, it.between, it.after) }
         val noCompletion = controlled.any { !it.first.received || !it.repeat.received }
         val baseState = when {
-            observations.isEmpty() -> HmaCheckState.INCONCLUSIVE
+            observations.isEmpty() -> if (budgetExpired) HmaCheckState.PARTIAL else HmaCheckState.INCONCLUSIVE
             observations.any { !it.controlsPassed } -> failureState(controls)
             targets.any { it.failure != HmaCallbackFailure.NONE } -> failureState(targets)
             noCompletion -> HmaCheckState.INCONCLUSIVE
@@ -61,7 +62,9 @@ object HmaBroadcastPolicy {
             "${controlled.size} passed caller controls before, between and after. " +
             "Target outcomes: ${targets.count { it.timedOut }} timeout(s), " +
             "${targets.count { it.failure == HmaCallbackFailure.PERMISSION_DENIED }} denial(s), " +
-            "${targets.count { it.failure == HmaCallbackFailure.FAILED }} failure(s)."
+            "${targets.count { it.failure == HmaCallbackFailure.FAILED }} failure(s). " +
+            "Batch deadline reached=$budgetExpired. Failed controls: " +
+            controls.filter { !it.consistent }.joinToString { it.controlDetail() }.ifEmpty { "none" } + "."
         return listOf(
             HmaBehaviorCheck(HmaCheckKind.BROADCAST_RESULT_COMPLETION,
                 if (timeouts.isNotEmpty()) HmaCheckState.TIMING_ANOMALY else baseState,
@@ -81,6 +84,9 @@ object HmaBroadcastPolicy {
 
     private val HmaCallbackObservation.timedOut: Boolean
         get() = !received && failure == HmaCallbackFailure.TIMED_OUT
+
+    private fun HmaCallbackObservation.controlDetail(): String =
+        "received=$received, ordered=$ordered, sticky=$sticky, result=$payloadPreserved, intent=$intentPreserved, failure=$failure"
 
     private fun failureState(observations: List<HmaCallbackObservation>): HmaCheckState = when {
         observations.any { it.failure == HmaCallbackFailure.PERMISSION_DENIED } -> HmaCheckState.PERMISSION_LIMITED

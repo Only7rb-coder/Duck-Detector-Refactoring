@@ -90,4 +90,12 @@ class HmaBroadcastComparisonProbeTest {
         assertEquals(true, job.isCancelled)
         assertEquals(false, returned)
     }
+
+    @Test fun `deadline before the first completed pair is explicit partial coverage`() = runTest {
+        val result = HmaBroadcastComparisonProbe().run("caller", listOf("target")) {
+            if (it == "target") delay(9000)
+            normal
+        }
+        assertEquals(true, result.all { it.state == HmaCheckState.PARTIAL && it.packages.isEmpty() })
+    }
 }

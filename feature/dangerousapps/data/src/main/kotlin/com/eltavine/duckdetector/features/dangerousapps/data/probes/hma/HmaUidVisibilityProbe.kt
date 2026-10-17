@@ -75,6 +75,7 @@ internal class HmaUidVisibilityProbe(
         return HmaUidVisibilityPolicy.evaluate(HmaUidVisibilityObservation(
             complete = snapshot.status == HmaUidTaskBridge.COMPLETE,
             checked = snapshot.checked,
+            firstUid = base + 10000,
             taskUids = snapshot.tasks.keys,
             callerUid = self,
             callerAssociationBefore = before,

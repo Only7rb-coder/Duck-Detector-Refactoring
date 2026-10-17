@@ -21,7 +21,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class HmaUidVisibilityPolicyTest {
-    private val baseline = HmaUidVisibilityObservation(true, 10000, setOf(10042, 10043), 10042,
+    private val baseline = HmaUidVisibilityObservation(true, 10000, 10000, setOf(10042, 10043), 10042,
         true, true, emptyList(), false, false)
 
     @Test fun `a completed scan must contain the live caller`() {
@@ -51,5 +51,25 @@ class HmaUidVisibilityPolicyTest {
 
     @Test fun `complete controlled matching associations are consistent within scope`() {
         assertEquals(HmaCheckState.CONSISTENT, HmaUidVisibilityPolicy.evaluate(baseline).state)
+    }
+
+    @Test fun `a partial visited caller omission suppresses foreign UID claims`() {
+        val result = HmaUidVisibilityPolicy.evaluate(baseline.copy(complete = false, checked = 44,
+            taskUids = setOf(10043), unassociated = listOf(10043)))
+        assertEquals(HmaCheckState.INCONCLUSIVE, result.state)
+        assertEquals(emptyList<Int>(), result.uids)
+    }
+
+    @Test fun `caller at the visited prefix boundary must be distinguished from an unvisited caller`() {
+        val prefix = baseline.copy(complete = false, checked = 42, taskUids = setOf(10001))
+        assertEquals(HmaCheckState.PARTIAL, HmaUidVisibilityPolicy.evaluate(prefix).state)
+        assertEquals(HmaCheckState.INCONCLUSIVE, HmaUidVisibilityPolicy.evaluate(prefix.copy(checked = 43)).state)
+    }
+
+    @Test fun `partial caller control uses the actual Android user range`() {
+        val prefix = baseline.copy(complete = false, firstUid = 1010000, callerUid = 1010042,
+            checked = 42, taskUids = setOf(1010001))
+        assertEquals(HmaCheckState.PARTIAL, HmaUidVisibilityPolicy.evaluate(prefix).state)
+        assertEquals(HmaCheckState.INCONCLUSIVE, HmaUidVisibilityPolicy.evaluate(prefix.copy(checked = 43)).state)
     }
 }

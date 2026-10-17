@@ -32,19 +32,23 @@ internal class HmaBroadcastComparisonProbe {
         val initial = receive(callerPackage)
         var before = initial
         val comparisons = mutableListOf<HmaCallbackComparison>()
+        var budgetExpired = false
         // Keep a complete observation only after its trailing control; a cancelled pair is partial coverage.
-        if (initial.consistent) withTimeoutOrNull(BATCH_TIMEOUT_MS) {
-            for (packageName in packages) {
-                val first = receive(packageName)
-                val between = receive(callerPackage)
-                val repeat = receive(packageName)
-                val after = receive(callerPackage)
-                comparisons += HmaCallbackComparison(packageName, first, repeat, before, between, after)
-                if (!between.consistent || !after.consistent) break
-                before = after
-            }
+        if (initial.consistent) {
+            budgetExpired = withTimeoutOrNull(BATCH_TIMEOUT_MS) {
+                for (packageName in packages) {
+                    val first = receive(packageName)
+                    val between = receive(callerPackage)
+                    val repeat = receive(packageName)
+                    val after = receive(callerPackage)
+                    comparisons += HmaCallbackComparison(packageName, first, repeat, before, between, after)
+                    if (!between.consistent || !after.consistent) break
+                    before = after
+                }
+                true
+            } == null
         }
-        return HmaBroadcastPolicy.evaluate(initial, comparisons, packages.size)
+        return HmaBroadcastPolicy.evaluate(initial, comparisons, packages.size, budgetExpired)
     }
 
     private companion object { const val BATCH_TIMEOUT_MS = 8000L }
