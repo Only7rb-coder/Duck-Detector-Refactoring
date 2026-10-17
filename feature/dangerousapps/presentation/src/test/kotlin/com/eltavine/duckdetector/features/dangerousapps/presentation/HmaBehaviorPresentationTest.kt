@@ -45,4 +45,15 @@ class HmaBehaviorPresentationTest {
         assertEquals(DetectionSeverity.INFO, model.status.severity)
         assertEquals("Behavior checks incomplete", model.verdict)
     }
+
+    @Test fun `repeated missing callbacks remain a lower confidence warning without an HMA alert`() {
+        val model = DangerousAppsCardModelMapper().map(report(HmaBehaviorCheck(
+            HmaCheckKind.BROADCAST_RESULT_COMPLETION, HmaCheckState.TIMING_ANOMALY,
+            "Repeated deadlines with passing controls.", packages = listOf("target"))))
+        assertEquals(DetectionSeverity.WARNING, model.status.severity)
+        assertEquals(null, model.hmaAlert)
+        assertEquals("Repeated callback timeout asymmetry", model.verdict)
+        assertTrue(model.context.any { it.value.contains("lower confidence") })
+        assertTrue(model.summary.contains("lower-confidence"))
+    }
 }

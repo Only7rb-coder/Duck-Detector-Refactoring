@@ -39,18 +39,23 @@ class HmaBehaviorProbe(context: Context) {
         }
         val ordered = HmaBehaviorPolicy.targetOrder(packages, corroboratedPackages)
         val selected = ordered.take(MAX_EXCEPTION_TARGETS)
-        val callbackTargets = ordered.take(MAX_CALLBACK_TARGETS)
         val platform = HmaPlatformCalls(context)
         val exceptions = HmaExceptionProbe()
-        val results = listOf(
+        val exceptionResults = listOf(
             exceptions.run(HmaCheckKind.BROADCAST_CROSS_USER, context.packageName, selected, platform::crossUserBroadcast),
             exceptions.run(HmaCheckKind.PACKAGE_INFO_EXCEPTION, context.packageName, selected, platform::packageInfo),
             exceptions.run(HmaCheckKind.APPLICATION_INFO_EXCEPTION, context.packageName, selected, platform::applicationInfo),
-            HmaBroadcastResultProbe(context, platform).run(callbackTargets),
-            HmaUidVisibilityProbe(context).run(visibility),
         )
+        // Permission anomalies prioritize the callback budget without being counted as independent evidence.
+        val callbackTargets = HmaBehaviorPolicy.targetOrder(ordered,
+            corroboratedPackages + exceptionResults.flatMap { it.packages }).take(MAX_CALLBACK_TARGETS)
+        val results = exceptionResults + HmaBroadcastResultProbe(context, platform).run(callbackTargets) +
+            HmaUidVisibilityProbe(context).run(visibility)
         return results.map { result ->
-            val evaluated = if (result.kind == HmaCheckKind.BROADCAST_RESULT_TO) callbackTargets.size else selected.size
+            val evaluated = when (result.kind) {
+                HmaCheckKind.BROADCAST_RESULT_TO, HmaCheckKind.BROADCAST_RESULT_COMPLETION -> callbackTargets.size
+                else -> selected.size
+            }
             if (result.kind == HmaCheckKind.UID_TASK_VISIBILITY) result else result.copy(
                 state = if (ordered.size > evaluated && result.state == HmaCheckState.CONSISTENT)
                     HmaCheckState.PARTIAL else result.state,
@@ -61,6 +66,6 @@ class HmaBehaviorProbe(context: Context) {
 
     private companion object {
         const val MAX_EXCEPTION_TARGETS = 128
-        const val MAX_CALLBACK_TARGETS = 24
+        const val MAX_CALLBACK_TARGETS = 128
     }
 }

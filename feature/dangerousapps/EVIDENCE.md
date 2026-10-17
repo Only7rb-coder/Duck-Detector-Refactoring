@@ -53,6 +53,20 @@ source used here; it makes no claim about independent prior discoveries. The sec
 countermeasures mentioned in the report are not incorporated. No third-party code or text is copied
 or adapted; the implementation uses the documented mechanisms and independent tests below.
 
+### Report coverage
+
+| Supplied report point | Implemented check | Evidence level |
+| --- | --- | --- |
+| 1.1 Broadcast cross-user exception suppression | BROADCAST_CROSS_USER | Repeated exception difference with caller controls |
+| 1.2 Missing resultTo delivery | BROADCAST_RESULT_COMPLETION | Repeated deadline asymmetry with interleaved controls; lower confidence |
+| 1.2 Incorrect manual resultTo delivery | BROADCAST_RESULT_TO | Repeated final flag/result/intent difference with caller controls |
+| 2.0 getPackageInfo exception suppression | PACKAGE_INFO_EXCEPTION | Repeated permission exception difference |
+| 2.0 getApplicationInfo exception suppression | APPLICATION_INFO_EXCEPTION | Repeated permission exception difference |
+| 3.0 getpriority visibility of running hidden UIDs | UID_TASK_VISIBILITY | Repeated task/association difference, without package identity |
+
+The seccomp and kernel approaches in point 3.0 are countermeasures. Refused native queries retain
+permission-limited/unavailable states; their absence cannot establish that no app is hidden.
+
 ### Permission-exception consistency
 
 - Observable signal: repeated target-package calls return normally or throw NameNotFoundException,
@@ -81,31 +95,48 @@ or adapted; the implementation uses the documented mechanisms and independent te
 - Visibility limits: at most 128 distinct catalog targets absent from the current inventory are
   compared, prioritizing packages already corroborated by other probes before catalog order; the report retains the selected/total scope. AOSP package filtering
   alone does not establish a mismatch because permission checks precede target lookup.
-- Result states: consistent in evaluated scope, inconsistent, inconclusive, partial, unsupported.
+- Result states: consistent in evaluated scope, inconsistent, inconclusive, partial, unavailable, unsupported.
 - Interpretation: only repeated differences with passing controls produce warning-level evidence.
   NameNotFoundException alone is normal package-query behavior, not evidence of hiding.
 
 ### Ordered-broadcast final callback
 
-- Observable signal: whether the final callback arrives with ordered=false, sticky=false and the
-  initial result code, data and token extras preserved, with no matching target receiver.
-- Producing subsystem: framework broadcast queues and final IIntentReceiver delivery.
-- Mechanism: sendOrderedBroadcast uses the same absent explicit component. Caller-package controls
-  bracket repeated target calls. Each callback has a 1 s timeout; the target batch has a 6 s budget.
-  Late callbacks are ignored after coroutine cancellation; no receiver registration is retained.
-  These budgets bound asynchronous callback waits; a blocked synchronous Binder submission cannot
-  be preempted by coroutine cancellation and may delay the scan.
-- Primary references: AOSP Android 10 [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java)
+- Observable signals: completion before a callback deadline, and separately final-receiver semantics
+  (ordered=false, sticky=false, preserved result code/data/extras and original intent filter fields/token).
+  These are two facets of the same broadcast mechanism, not independent corroborating detectors.
+- Producing subsystem: framework broadcast queues, IApplicationThread and final IIntentReceiver delivery.
+- Mechanism: sendOrderedBroadcast uses the same absent explicit component. Each target is submitted
+  twice with successful caller-package callbacks required before, between and after the two calls.
+  Each callback has a 1 s timeout; the target batch has an 8 s budget. Incomplete pairs are discarded
+  and reduce coverage. Late callbacks are ignored after coroutine cancellation; no receiver is registered.
+  These budgets bound asynchronous waits; a blocked synchronous Binder submission cannot be preempted
+  by coroutine cancellation and may delay the scan.
+- Primary references: Android [Context.sendOrderedBroadcast](https://developer.android.com/reference/android/content/Context#sendOrderedBroadcast(android.content.Intent,%20java.lang.String,%20android.content.BroadcastReceiver,%20android.os.Handler,%20int,%20java.lang.String,%20android.os.Bundle))
+  documents the final result receiver; AOSP Android 10 [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java)
   sends the final result with false/false; Android 14 [BroadcastQueueModernImpl.scheduleResultTo](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueModernImpl.java)
-  schedules the final receiver through IApplicationThread with ordered=false.
-- Upstream reference: HMA-OSS [oss-173 BroadcastHook](https://github.com/frknkrc44/HMA-OSS/blob/oss-173/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/BroadcastHook.kt)
-  invokes performReceive directly with the BroadcastRecord.ordered flag.
-- Applicability: API 29–36, at most 24 selected targets, prioritizing already corroborated packages. The report does not
-  assert the behavior of an unspecified newer HMA test build.
-- Visibility limits: load, scheduling, process freezing and OEM behavior can delay callbacks. Missing
-  callbacks, failed controls, or a one-off difference remain inconclusive. Repeated payload/flag
-  differences are warning-level evidence of callback-semantic inconsistency, without module identity.
-- Result states: consistent, inconsistent, inconclusive, partially evaluated, unsupported.
+  and Android 16 [BroadcastQueueImpl.enqueueBroadcastLocked / scheduleResultTo](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueImpl.java)
+  schedule the final receiver when no receivers matched, passing the original intent and initial
+  results through IApplicationThread with ordered=false. No platform deadline of 1 s is guaranteed.
+- Upstream references: HMA-OSS [oss-164 BroadcastHook](https://github.com/frknkrc44/HMA-OSS/blob/oss-164/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/BroadcastHook.kt)
+  returns before queuing and omits final result delivery; [oss-173 BroadcastHook](https://github.com/frknkrc44/HMA-OSS/blob/oss-173/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/BroadcastHook.kt)
+  manually invokes performReceive with the BroadcastRecord.ordered flag.
+- Applicability: API 29–36; up to 128 distinct targets absent from inventory. Already corroborated
+  targets and targets showing repeated permission-exception anomalies receive priority within the
+  callback budget. Scope and completed-pair counts remain visible; prioritization adds no confidence.
+  The report does not assert the behavior of an unspecified newer HMA test build.
+- Interpretation: repeated received callbacks with wrong flags/result/intent produce warning-level
+  semantic evidence. Two target timeouts with three successful local controls produce a separate
+  lower-confidence timing warning, never proof that callbacks were permanently dropped or that a
+  particular module exists. A single timeout, failed control, denial, decoding failure or interrupted
+  pair cannot produce this warning. Callback-intent preservation additionally checks call correlation;
+  intent replacement or a mismatched per-call token is a semantic difference. Expected intent fields
+  are copied before submission so mutation of the submitted object does not alter the baseline.
+- False positives and visibility limits: load, scheduling, freezing, OEM policy and transient system
+  failures can delay callbacks selectively despite controls. Both completion and semantic checks
+  preserve permission, failure and partial-coverage states. Bundle decoding failures are unavailable,
+  rather than semantic mismatches or exceptions escaping on the application main thread.
+- Result states: consistent, inconsistent, lower-confidence timing anomaly, inconclusive, partial,
+  permission limited, unavailable, unsupported.
 
 ### UID task visibility through getpriority
 
@@ -120,7 +151,9 @@ or adapted; the implementation uses the documented mechanisms and independent te
   by successful caller-package association controls. The raw kernel 1..40 return is converted to
   nice=20-return; failures, signals and seccomp refusal never become absence.
 - Primary references: ACK android14-6.1 at `48e3cd973485465613da6d71fa17139773546573`, [kernel/sys.c:getpriority](https://android.googlesource.com/kernel/common/+/48e3cd973485465613da6d71fa17139773546573/kernel/sys.c)
-  (`task_uid`, `task_pid_vnr`, initial ESRCH); AOSP Android 14
+  (`task_uid`, `task_pid_vnr`, initial ESRCH); the same traversal and return semantics in ACK
+  android15-6.6 at [150617c4d667a241e52441e855befac0c5d6702b](https://android.googlesource.com/kernel/common/+/150617c4d667a241e52441e855befac0c5d6702b/kernel/sys.c)
+  cover the 6.6 emulator comparison; AOSP Android 14
   [bionic getpriority.cpp](https://android.googlesource.com/platform/bionic/+/android-14.0.0_r1/libc/bionic/getpriority.cpp)
   and [UserHandle](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/core/java/android/os/UserHandle.java);
   [package visibility](https://developer.android.com/training/package-visibility);
@@ -139,7 +172,10 @@ or adapted; the implementation uses the documented mechanisms and independent te
 
 Unit tests cover repeated permission controls, public-wrapper NameNotFoundException conversion,
 failed controls, ordered/sticky/payload callback differences, timeout uncertainty, native payload
-framing, raw priority conversion, partial scans and warning-level presentation. Native builds cover
+framing, raw priority conversion, partial scans and warning-level presentation. Callback tests also
+cover interleaved controls, paired timeout asymmetry, call correlation, batch interruption and external
+cancellation. The native parent validates child counts before indexing fixed buffers; Kotlin also
+rejects unsorted hits, UIDs beyond the visited prefix and success states carrying collection errors. Native builds cover
 all four supported ABIs. Device results are recorded after executing the runtime checks; no HMA
 version or configuration is assumed from package presence alone.
 
@@ -161,7 +197,7 @@ in the intervening release sources:
 | android-15.0.0_r1 | [ComputerEngine](https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/services/core/java/com/android/server/pm/ComputerEngine.java) | [BroadcastQueueModernImpl](https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueModernImpl.java) |
 | android-16.0.0_r1 | ComputerEngine linked above | [BroadcastQueueImpl](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueImpl.java) |
 
-#### Device observations (2026-10-18, Asia/Singapore)
+#### Device observations before callback-coverage revision (2026-10-18, Asia/Singapore)
 
 PJX110, Android 16/API 36, security patch 2026-04-01, arm64, kernel
 `6.1.141-android14-11-o-gd2a6093d5589`. Package metadata reports HMA-OSS `oss-162`
@@ -176,6 +212,11 @@ DetectorRuntimeSmokeTest, with caller-package controls passing in each run:
 | getApplicationInfo exception | 124/124 targets repeated; the same nine target names had repeated exception mismatches |
 | Ordered-broadcast final result | 24/24 selected targets repeated; flags and payloads matched; overall catalog coverage remains partial (24/124) |
 | getpriority UID visibility | 10000/10000 UIDs checked; 87 then 86 task UIDs; the same eight UIDs repeatedly lacked visible package associations; no recheck failure or recheck-limit truncation |
+
+These runtime observations describe the original five-check implementation. The expanded callback
+scope, interleaved controls and intent-token check still need a fresh PJX110 run: no physical device
+was attached during the revision. The unit tests exercise missing-resultTo and wrong-resultTo paths
+with structured observations, not an actual oss-164/173 installation.
 
 The nine queried names are behavior fingerprints, not proof that nine corresponding apps are
 installed. The eight UIDs do not identify hidden packages. These observations do not validate
@@ -197,7 +238,7 @@ The context bootstrap instrumented test and MainActivity cold-launch smoke check
 The runtime harness uses AndroidX Test Runner 1.7.0 with the existing JUnit extension 1.3.0;
 [runner documentation](https://developer.android.com/training/testing/instrumented-tests/androidx-test-libraries/runner)
 and [release notes](https://developer.android.com/jetpack/androidx/releases/test) establish the
-runtime dependency. Twenty-five new JVM tests cover the control, failure and reduction rules.
+runtime dependency. Thirty-seven new JVM tests cover the exception, callback, UID policy, native framing and presentation rules.
 
 
 The following validation commands passed with the repository-pinned uihelper revision
@@ -212,3 +253,25 @@ for s in .github/scripts/check-*.py; do python3 "$s" || exit 1; done
 
 The SDK consumer is a separate build using only the published AAR and Maven dependencies. Both
 Debug and Release native library builds completed for arm64-v8a, armeabi-v7a, x86 and x86_64.
+
+#### Android 16 emulator comparison after callback-coverage revision
+
+A read-only `duck_api36` AVD session ran the revised app and generic paired scanner/export smoke
+test: `OK (1 test)`, two scans in 7.626 s. Image fingerprint:
+`google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.F3/13894323:userdebug/dev-keys`,
+security patch 2025-07-05, arm64, kernel `6.6.66-android15-8-gd0c43a640eab-ab13812146-4k`.
+No HMA-OSS, LSPosed or Magisk manager package was listed in this session. This is an emulator
+framework comparison, not a security guarantee or a replacement for module-positive device tests.
+
+Both scans exposed 247 package names and evaluated all 124 catalog targets. The three exception
+checks each observed the expected SecurityException in all 248 target calls. Both final-callback
+checks completed all 124 pairs with passing local controls, no timeout and no flag/result/intent-token
+difference. Each native scan covered 10,000 UIDs, found 48 task UIDs and no repeatedly unassociated
+UID; caller controls passed and no recheck failed or reached its limit. The resulting headline was
+`No known risky packages`. MainActivity also cold-launched successfully. The temporary emulator
+session was stopped after testing without saving a snapshot.
+
+The revised sources passed the full unit/app/lint/buildHealth/SDK command above, the standalone SDK
+consumer build and all repository guards. The 37 HMA regression tests passed. Device coverage for
+oss-164 callback omission, oss-173 wrong final flags, newer fixed builds and enforced seccomp refusal
+remains open; PJX110 observations above apply to the earlier implementation.

@@ -24,7 +24,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaBehaviorCheck
-import com.eltavine.duckdetector.features.dangerousapps.domain.HmaBehaviorPolicy
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCallbackObservation
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCallbackFailure
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -37,39 +36,35 @@ internal class HmaBroadcastResultProbe(
     private val context: Context,
     private val platform: HmaPlatformCalls,
 ) {
-    suspend fun run(packages: List<String>): HmaBehaviorCheck {
-        val before = receive(context.packageName)
-        val observations = mutableListOf<Pair<String, Pair<HmaCallbackObservation, HmaCallbackObservation>>>()
-        // Bound the whole target batch, in addition to each asynchronous callback.
-        if (before.consistent) withTimeoutOrNull(BATCH_TIMEOUT_MS) {
-            for (packageName in packages) {
-                observations += packageName to (receive(packageName) to receive(packageName))
-            }
-        }
-        val after = receive(context.packageName)
-        return HmaBehaviorPolicy.callback(before, after, observations, packages.size).let { result ->
-            result.copy(detail = "${result.detail} Evaluated ${observations.size}/${packages.size} selected targets.")
-        }
-    }
+    suspend fun run(packages: List<String>): List<HmaBehaviorCheck> =
+        HmaBroadcastComparisonProbe().run(context.packageName, packages, ::receive)
 
     private suspend fun receive(packageName: String): HmaCallbackObservation =
         withTimeoutOrNull(CALLBACK_TIMEOUT_MS) {
             suspendCancellableCoroutine { continuation ->
                 val token = UUID.randomUUID().toString()
+                val sentIntent = platform.intent(packageName).putExtra(TOKEN_KEY, token)
+                val expectedIntent = Intent(sentIntent)
                 val receiver = object : BroadcastReceiver() {
                     override fun onReceive(context: Context?, intent: Intent?) {
-                        val observation = HmaCallbackObservation(
-                            received = true,
-                            ordered = isOrderedBroadcast,
-                            sticky = isInitialStickyBroadcast,
-                            payloadPreserved = resultCode == RESULT_CODE && resultData == token &&
-                                getResultExtras(false)?.getString(TOKEN_KEY) == token,
-                        )
+                        val observation = try {
+                            HmaCallbackObservation(
+                                received = true,
+                                ordered = isOrderedBroadcast,
+                                sticky = isInitialStickyBroadcast,
+                                payloadPreserved = resultCode == RESULT_CODE && resultData == token &&
+                                    getResultExtras(false)?.getString(TOKEN_KEY) == token,
+                                intentPreserved = intent?.filterEquals(expectedIntent) == true &&
+                                    intent.getStringExtra(TOKEN_KEY) == token,
+                            )
+                        } catch (_: Exception) {
+                            HmaCallbackObservation(true, failure = HmaCallbackFailure.FAILED)
+                        }
                         if (continuation.isActive) continuation.resume(observation)
                     }
                 }
                 try {
-                    context.sendOrderedBroadcast(platform.intent(packageName), null, receiver,
+                    context.sendOrderedBroadcast(sentIntent, null, receiver,
                         Handler(Looper.getMainLooper()), RESULT_CODE, token,
                         Bundle().apply { putString(TOKEN_KEY, token) })
                 } catch (failure: Exception) {
@@ -82,7 +77,6 @@ internal class HmaBroadcastResultProbe(
 
     private companion object {
         const val CALLBACK_TIMEOUT_MS = 1000L
-        const val BATCH_TIMEOUT_MS = 6000L
         const val RESULT_CODE = 0x484D41
         const val TOKEN_KEY = "probe_token"
     }

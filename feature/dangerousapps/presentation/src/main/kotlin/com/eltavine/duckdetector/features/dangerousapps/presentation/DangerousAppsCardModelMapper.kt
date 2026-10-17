@@ -85,6 +85,7 @@ class DangerousAppsCardModelMapper {
             DangerousAppsStage.READY -> when {
                 report.hiddenCount > 0 -> "HMA-style concealment detected"
                 report.behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } -> "Platform behavior mismatch observed"
+                report.behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } -> "Repeated callback timeout asymmetry"
                 report.detectedCount > 0 -> "${report.detectedCount} risky package(s) surfaced"
                 report.suspiciousSharedStorageDenied -> "Shared storage baseline denied"
                 report.suspiciousLowPmInventory -> "Package inventory unusually small"
@@ -111,6 +112,9 @@ class DangerousAppsCardModelMapper {
 
                 report.behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } ->
                     "Controlled interface checks observed inconsistent exception, broadcast callback or UID visibility behavior. These signals do not identify a specific hiding module."
+
+                report.behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } ->
+                    "Target callbacks repeatedly missed their deadlines while interleaved caller controls succeeded. This is lower-confidence timing evidence; scheduling and OEM behavior can also delay delivery."
 
                 report.detectedCount > 0 ->
                     buildString {

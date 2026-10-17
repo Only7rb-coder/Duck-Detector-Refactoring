@@ -77,7 +77,8 @@ int collect(int fd, int first_uid, int last_uid) {
     const int64_t start = monotonic_ns();
     if (start < 0) { scan.error = errno; return write_scan(fd, scan) ? 0 : 1; }
     scan.status = kComplete;
-    for (int uid = first_uid; uid <= last_uid; ++uid) {
+    for (int64_t candidate = first_uid; candidate <= last_uid; ++candidate) {
+        const int uid = static_cast<int>(candidate);
         if ((scan.checked % 16) == 0) {
             const int64_t now = monotonic_ns();
             if (now < 0) { scan.status = kFailure; scan.error = errno; break; }
@@ -97,6 +98,24 @@ int collect(int fd, int first_uid, int last_uid) {
     }
     return write_scan(fd, scan) ? 0 : 1;
 }
+
+bool valid_scan(const Scan &scan, int first_uid, int last_uid) {
+    if (scan.status < kComplete || scan.status > kFailure || scan.checked < 0 ||
+        scan.checked > last_uid - first_uid + 1 || scan.count < 0 ||
+        scan.count > kMaxHits || scan.count > scan.checked) return false;
+    if (scan.status == kComplete && scan.checked != last_uid - first_uid + 1) return false;
+    if ((scan.status == kComplete || scan.status == kPartial) &&
+        (scan.self_priority < 1 || scan.self_priority > 40 || scan.error != 0)) return false;
+    int previous = first_uid - 1;
+    for (int index = 0; index < scan.count; ++index) {
+        const auto &hit = scan.hits[index];
+        if (hit.uid <= previous || static_cast<int64_t>(hit.uid) >=
+            static_cast<int64_t>(first_uid) + scan.checked ||
+            hit.raw_priority < 1 || hit.raw_priority > 40) return false;
+        previous = hit.uid;
+    }
+    return true;
+}
 } // namespace
 
 extern "C" JNIEXPORT jintArray JNICALL
@@ -114,6 +133,11 @@ Java_com_eltavine_duckdetector_features_dangerousapps_data_probes_hma_HmaUidTask
         if (outcome.end == ChildEnd::kExited && outcome.exit_status == 0 &&
             outcome.report_length == sizeof(Scan)) {
             std::memcpy(&scan, buffer.data(), sizeof(scan));
+            // Validate before indexing child-provided counts, not only in the Kotlin parser.
+            if (!valid_scan(scan, first_uid, last_uid)) {
+                scan = Scan{};
+                scan.error = EPROTO;
+            }
         } else {
             switch (outcome.end) {
                 case ChildEnd::kSeccompTrapped: scan.status = kRestricted; break;

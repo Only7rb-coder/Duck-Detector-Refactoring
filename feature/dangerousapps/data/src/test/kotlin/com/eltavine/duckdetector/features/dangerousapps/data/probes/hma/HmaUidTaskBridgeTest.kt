@@ -52,4 +52,19 @@ class HmaUidTaskBridgeTest {
             HmaUidTaskBridge.parse(values, 10000, 10000)
         }
     }
+
+    @Test fun `partial payload cannot claim unvisited UIDs or ignore a collection error`() {
+        for (values in listOf(intArrayOf(1, 1, 1, 0, 20, 1, 10001, 20),
+            intArrayOf(1, 1, 1, 5, 20, 0))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                HmaUidTaskBridge.parse(values, 10000, 19999)
+            }
+        }
+    }
+
+    @Test fun `native observations must retain ascending scan order`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HmaUidTaskBridge.parse(intArrayOf(1, 0, 2, 0, 20, 2, 10001, 20, 10000, 20), 10000, 10001)
+        }
+    }
 }

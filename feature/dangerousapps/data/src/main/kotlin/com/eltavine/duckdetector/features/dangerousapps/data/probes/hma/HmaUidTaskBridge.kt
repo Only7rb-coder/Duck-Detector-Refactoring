@@ -53,16 +53,19 @@ internal class HmaUidTaskBridge(
             val error = values[3]
             val count = values[5]
             require(status in COMPLETE..FAILURE && count in 0..512 && values.size == 6 + count * 2)
-            require(firstUid <= lastUid && checked in 0..(lastUid - firstUid + 1))
+            require(firstUid >= 0 && firstUid <= lastUid && lastUid.toLong() - firstUid <= 9999)
+            require(checked in 0..(lastUid - firstUid + 1))
             require(count <= checked)
             if (status == COMPLETE) require(checked == lastUid - firstUid + 1)
-            if (status == COMPLETE || status == PARTIAL) require(values[4] in 1..40)
+            if (status == COMPLETE || status == PARTIAL) require(values[4] in 1..40 && error == 0)
             val tasks = linkedMapOf<Int, Int>()
+            var previous = firstUid - 1
             repeat(count) { index ->
                 val uid = values[6 + index * 2]
                 val rawPriority = values[7 + index * 2]
-                require(uid in firstUid..lastUid && rawPriority in 1..40 && uid !in tasks)
+                require(uid > previous && uid.toLong() < firstUid.toLong() + checked && rawPriority in 1..40)
                 tasks[uid] = 20 - rawPriority
+                previous = uid
             }
             return UidTaskSnapshot(status, checked, error, tasks)
         }

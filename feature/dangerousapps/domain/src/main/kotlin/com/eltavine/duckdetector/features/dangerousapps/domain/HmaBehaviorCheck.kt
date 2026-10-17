@@ -19,6 +19,7 @@ package com.eltavine.duckdetector.features.dangerousapps.domain
 
 enum class HmaCheckKind(val label: String) {
     BROADCAST_CROSS_USER("Broadcast cross-user exception"),
+    BROADCAST_RESULT_COMPLETION("Broadcast final callback completion"),
     BROADCAST_RESULT_TO("Broadcast final result callback"),
     PACKAGE_INFO_EXCEPTION("getPackageInfo exception"),
     APPLICATION_INFO_EXCEPTION("getApplicationInfo exception"),
@@ -28,6 +29,7 @@ enum class HmaCheckKind(val label: String) {
 enum class HmaCheckState(val label: String) {
     CONSISTENT("Consistent in evaluated scope"),
     INCONSISTENT("Behavior mismatch observed"),
+    TIMING_ANOMALY("Repeated callback timeout (lower confidence)"),
     INCONCLUSIVE("Inconclusive"),
     UNAVAILABLE("Unavailable"),
     UNSUPPORTED("Unsupported"),
@@ -58,9 +60,11 @@ data class HmaCallbackObservation(
     val ordered: Boolean = false,
     val sticky: Boolean = false,
     val payloadPreserved: Boolean = false,
+    val intentPreserved: Boolean = false,
     val failure: HmaCallbackFailure = HmaCallbackFailure.NONE,
 ) {
-    val consistent: Boolean get() = received && !ordered && !sticky && payloadPreserved
+    val consistent: Boolean get() = received && !ordered && !sticky && payloadPreserved &&
+        intentPreserved && failure == HmaCallbackFailure.NONE
 }
 
 object HmaBehaviorPolicy {
@@ -81,42 +85,14 @@ object HmaBehaviorPolicy {
         }
         val mismatch = observations.filter { it.first.isSkippedException() && it.repeat.isSkippedException() }
         val incomplete = observations.any { it.first != it.repeat || it.first in setOf(HmaCallOutcome.FAILED, HmaCallOutcome.UNAVAILABLE) }
+        val outcomes = observations.flatMap { listOf(it.first, it.repeat) }
+        val counts = HmaCallOutcome.entries.joinToString { outcome -> "$outcome=${outcomes.count { it == outcome }}" }
         return HmaBehaviorCheck(kind, when {
             mismatch.isNotEmpty() -> HmaCheckState.INCONSISTENT
             incomplete || observations.isEmpty() -> HmaCheckState.INCONCLUSIVE
             else -> HmaCheckState.CONSISTENT
-        }, "${observations.size} package(s) checked twice between permission controls; ${mismatch.size} repeated exception mismatch(es).",
+        }, "${observations.size} package(s) checked twice between permission controls; ${mismatch.size} repeated exception mismatch(es). Outcomes: $counts.",
             packages = mismatch.map { it.packageName })
-    }
-
-    fun callback(
-        before: HmaCallbackObservation,
-        after: HmaCallbackObservation,
-        observations: List<Pair<String, Pair<HmaCallbackObservation, HmaCallbackObservation>>>,
-        expectedCount: Int = observations.size,
-    ): HmaBehaviorCheck {
-        val kind = HmaCheckKind.BROADCAST_RESULT_TO
-        if (!before.consistent || !after.consistent) {
-            val state = when {
-                before.failure == HmaCallbackFailure.PERMISSION_DENIED || after.failure == HmaCallbackFailure.PERMISSION_DENIED -> HmaCheckState.PERMISSION_LIMITED
-                before.failure == HmaCallbackFailure.FAILED || after.failure == HmaCallbackFailure.FAILED -> HmaCheckState.UNAVAILABLE
-                else -> HmaCheckState.INCONCLUSIVE
-            }
-            return HmaBehaviorCheck(kind, state,
-                "Final-receiver controls failed (${before.failure} / ${after.failure}); callback timing and flags cannot be compared.")
-        }
-        // A missing callback alone is a timeout, not proof of a hook.
-        val mismatches = observations.filter { (_, pair) ->
-            pair.first.received && pair.second.received && !pair.first.consistent && !pair.second.consistent
-        }
-        val incomplete = observations.any { (_, pair) -> !pair.first.consistent || !pair.second.consistent }
-        return HmaBehaviorCheck(kind, when {
-            mismatches.isNotEmpty() -> HmaCheckState.INCONSISTENT
-            incomplete || observations.isEmpty() -> HmaCheckState.INCONCLUSIVE
-            observations.size < expectedCount -> HmaCheckState.PARTIAL
-            else -> HmaCheckState.CONSISTENT
-        }, "${observations.size}/$expectedCount package(s) checked twice; ${mismatches.size} repeated final-receiver semantic mismatch(es). Missing callbacks are inconclusive.",
-            packages = mismatches.map { it.first })
     }
 
     private fun HmaCallOutcome.isSkippedException(): Boolean =

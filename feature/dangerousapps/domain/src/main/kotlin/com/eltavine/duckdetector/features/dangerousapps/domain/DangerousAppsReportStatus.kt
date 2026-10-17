@@ -27,6 +27,7 @@ fun DangerousAppsReport.toDetectorStatus(): DetectorStatus {
         DangerousAppsStage.READY -> when {
             hiddenCount > 0 -> DetectorStatus.danger()
             behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } -> DetectorStatus.warning()
+            behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } -> DetectorStatus.warning()
             detectedCount > 0 -> DetectorStatus.warning()
             suspiciousSharedStorageDenied -> DetectorStatus.warning()
             suspiciousLowPmInventory -> DetectorStatus.warning()
