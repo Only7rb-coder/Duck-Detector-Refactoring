@@ -38,6 +38,8 @@ fun DangerousAppsReport.toDetectorStatus(): DetectorStatus {
                 InfoKind.SUPPORT
             )
 
+            behaviorChecks.any { it.state != HmaCheckState.CONSISTENT } -> DetectorStatus.info(InfoKind.SUPPORT)
+
             else -> DetectorStatus.allClear()
         }
     }

@@ -21,35 +21,46 @@ import android.content.Context
 import android.os.Build
 import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousPackageVisibility
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaBehaviorCheck
+import com.eltavine.duckdetector.features.dangerousapps.domain.HmaBehaviorPolicy
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckKind
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckState
 
 class HmaBehaviorProbe(context: Context) {
     private val context = context.applicationContext
 
-    suspend fun run(packages: List<String>, visibility: DangerousPackageVisibility): List<HmaBehaviorCheck> {
+    suspend fun run(
+        packages: List<String>,
+        visibility: DangerousPackageVisibility,
+        corroboratedPackages: Set<String> = emptySet(),
+    ): List<HmaBehaviorCheck> {
         // Hidden flag and final-receiver semantics were checked against AOSP 10, 14 and 16.
         if (Build.VERSION.SDK_INT !in 29..36) return HmaCheckKind.entries.map {
             HmaBehaviorCheck(it, HmaCheckState.UNSUPPORTED, "Platform semantics have not been verified for API ${Build.VERSION.SDK_INT}.")
         }
-        val selected = packages.distinct().take(MAX_TARGETS)
+        val ordered = HmaBehaviorPolicy.targetOrder(packages, corroboratedPackages)
+        val selected = ordered.take(MAX_EXCEPTION_TARGETS)
+        val callbackTargets = ordered.take(MAX_CALLBACK_TARGETS)
         val platform = HmaPlatformCalls(context)
         val exceptions = HmaExceptionProbe()
         val results = listOf(
             exceptions.run(HmaCheckKind.BROADCAST_CROSS_USER, context.packageName, selected, platform::crossUserBroadcast),
             exceptions.run(HmaCheckKind.PACKAGE_INFO_EXCEPTION, context.packageName, selected, platform::packageInfo),
             exceptions.run(HmaCheckKind.APPLICATION_INFO_EXCEPTION, context.packageName, selected, platform::applicationInfo),
-            HmaBroadcastResultProbe(context, platform).run(selected),
+            HmaBroadcastResultProbe(context, platform).run(callbackTargets),
             HmaUidVisibilityProbe(context).run(visibility),
         )
         return results.map { result ->
+            val evaluated = if (result.kind == HmaCheckKind.BROADCAST_RESULT_TO) callbackTargets.size else selected.size
             if (result.kind == HmaCheckKind.UID_TASK_VISIBILITY) result else result.copy(
-                state = if (packages.distinct().size > selected.size && result.state == HmaCheckState.CONSISTENT)
+                state = if (ordered.size > evaluated && result.state == HmaCheckState.CONSISTENT)
                     HmaCheckState.PARTIAL else result.state,
-                detail = "${result.detail} Target scope: ${selected.size}/${packages.distinct().size}; API ${Build.VERSION.SDK_INT}.",
+                detail = "${result.detail} Target scope: $evaluated/${ordered.size}; API ${Build.VERSION.SDK_INT}.",
             )
         }
     }
 
-    private companion object { const val MAX_TARGETS = 24 }
+    private companion object {
+        const val MAX_EXCEPTION_TARGETS = 128
+        const val MAX_CALLBACK_TARGETS = 24
+    }
 }

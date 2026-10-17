@@ -66,8 +66,11 @@ internal class HmaPlatformCalls(private val context: Context) {
             is SecurityException -> HmaCallOutcome.SECURITY_EXCEPTION
             is PackageManager.NameNotFoundException -> HmaCallOutcome.NAME_NOT_FOUND
             is ReflectiveOperationException -> HmaCallOutcome.UNAVAILABLE
+            is LinkageError -> HmaCallOutcome.UNAVAILABLE
             else -> HmaCallOutcome.FAILED
         }
+    } catch (_: LinkageError) {
+        HmaCallOutcome.UNAVAILABLE
     }
 
     companion object {

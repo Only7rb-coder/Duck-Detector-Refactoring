@@ -25,6 +25,14 @@ class HmaBehaviorPolicyTest {
     private val normal = HmaCallbackObservation(true, payloadPreserved = true)
     private val ordered = normal.copy(ordered = true)
 
+    @Test fun `corroborated late targets are evaluated before the catalog prefix`() {
+        val packages = (1..50).map { "package$it" }
+        val selected = HmaBehaviorPolicy.targetOrder(packages + packages, setOf("package50")).take(24)
+        assertEquals("package50", selected.first())
+        assertEquals(24, selected.distinct().size)
+        assertEquals("package1", selected[1])
+    }
+
     @Test fun `both public wrapper null conversion and early return expose missing permission checks`() {
         for (outcome in listOf(HmaCallOutcome.RETURNED, HmaCallOutcome.NAME_NOT_FOUND)) {
             val result = HmaBehaviorPolicy.exceptions(HmaCheckKind.PACKAGE_INFO_EXCEPTION,

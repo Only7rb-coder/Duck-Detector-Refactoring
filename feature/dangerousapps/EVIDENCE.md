@@ -78,8 +78,8 @@ or adapted; the implementation uses the documented mechanisms and independent te
 - Applicability: Android 10–16 (API 29–36); later releases explicitly return unsupported pending
   source verification. Privileged callers, OEM changes or failed hidden-method lookup invalidate
   controls and yield inconclusive results.
-- Visibility limits: at most 24 distinct catalog targets absent from the current inventory are
-  compared, in catalog order; the report retains the selected/total scope. AOSP package filtering
+- Visibility limits: at most 128 distinct catalog targets absent from the current inventory are
+  compared, prioritizing packages already corroborated by other probes before catalog order; the report retains the selected/total scope. AOSP package filtering
   alone does not establish a mismatch because permission checks precede target lookup.
 - Result states: consistent in evaluated scope, inconsistent, inconclusive, partial, unsupported.
 - Interpretation: only repeated differences with passing controls produce warning-level evidence.
@@ -93,12 +93,14 @@ or adapted; the implementation uses the documented mechanisms and independent te
 - Mechanism: sendOrderedBroadcast uses the same absent explicit component. Caller-package controls
   bracket repeated target calls. Each callback has a 1 s timeout; the target batch has a 6 s budget.
   Late callbacks are ignored after coroutine cancellation; no receiver registration is retained.
+  These budgets bound asynchronous callback waits; a blocked synchronous Binder submission cannot
+  be preempted by coroutine cancellation and may delay the scan.
 - Primary references: AOSP Android 10 [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java)
   sends the final result with false/false; Android 14 [BroadcastQueueModernImpl.scheduleResultTo](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueModernImpl.java)
   schedules the final receiver through IApplicationThread with ordered=false.
 - Upstream reference: HMA-OSS [oss-173 BroadcastHook](https://github.com/frknkrc44/HMA-OSS/blob/oss-173/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/BroadcastHook.kt)
   invokes performReceive directly with the BroadcastRecord.ordered flag.
-- Applicability: API 29–36, same bounded target scope as the permission checks. The report does not
+- Applicability: API 29–36, at most 24 selected targets, prioritizing already corroborated packages. The report does not
   assert the behavior of an unspecified newer HMA test build.
 - Visibility limits: load, scheduling, process freezing and OEM behavior can delay callbacks. Missing
   callbacks, failed controls, or a one-off difference remain inconclusive. Repeated payload/flag
@@ -117,7 +119,7 @@ or adapted; the implementation uses the documented mechanisms and independent te
   250 ms reap deadlines. Up to 16 unassociated UID candidates are queried again in children, bracketed
   by successful caller-package association controls. The raw kernel 1..40 return is converted to
   nice=20-return; failures, signals and seccomp refusal never become absence.
-- Primary references: ACK [android14-6.1 kernel/sys.c:getpriority](https://android.googlesource.com/kernel/common/+/refs/heads/android14-6.1/kernel/sys.c)
+- Primary references: ACK android14-6.1 at `48e3cd973485465613da6d71fa17139773546573`, [kernel/sys.c:getpriority](https://android.googlesource.com/kernel/common/+/48e3cd973485465613da6d71fa17139773546573/kernel/sys.c)
   (`task_uid`, `task_pid_vnr`, initial ESRCH); AOSP Android 14
   [bionic getpriority.cpp](https://android.googlesource.com/platform/bionic/+/android-14.0.0_r1/libc/bionic/getpriority.cpp)
   and [UserHandle](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/core/java/android/os/UserHandle.java);
@@ -130,7 +132,8 @@ or adapted; the implementation uses the documented mechanisms and independent te
   package identity. A completed scan only covers the stated user/range at sampling time. Seccomp,
   namespaces and kernel filtering can hide tasks; no absent task means no installed package.
 - Result states: consistent, inconsistent, inconclusive, partial, permission limited, unavailable,
-  unsupported. UID-only mismatches are warnings and never add a named hidden package or red HMA alert.
+  unsupported. UID-only mismatches are warnings and never add a named hidden package or red HMA alert. A completed
+  scan that omits the live caller UID invalidates the comparison.
 
 ### Validation coverage
 
@@ -139,3 +142,73 @@ failed controls, ordered/sticky/payload callback differences, timeout uncertaint
 framing, raw priority conversion, partial scans and warning-level presentation. Native builds cover
 all four supported ABIs. Device results are recorded after executing the runtime checks; no HMA
 version or configuration is assumed from package presence alone.
+
+The monitored catalog includes `org.frknkrc44.hma_oss`, as declared by the upstream HMA-OSS
+application and observed in the device package inventory. Target prioritization affects sampling
+coverage only; it does not promote the corroborating probes into stronger evidence.
+
+
+#### Release coverage of the framework contracts
+
+The MATCH_ANY_USER permission requirement and final-callback ordered=false rule were also checked
+in the intervening release sources:
+
+| Android tag | Permission enforcement | Final callback |
+| --- | --- | --- |
+| android-11.0.0_r1 | [PackageManagerService](https://android.googlesource.com/platform/frameworks/base/+/android-11.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java) | [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-11.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java) |
+| android-12.0.0_r1 | [PackageManagerService](https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java) | [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java) |
+| android-13.0.0_r1 | [ComputerEngine](https://android.googlesource.com/platform/frameworks/base/+/android-13.0.0_r1/services/core/java/com/android/server/pm/ComputerEngine.java) | [BroadcastQueue](https://android.googlesource.com/platform/frameworks/base/+/android-13.0.0_r1/services/core/java/com/android/server/am/BroadcastQueue.java) |
+| android-15.0.0_r1 | [ComputerEngine](https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/services/core/java/com/android/server/pm/ComputerEngine.java) | [BroadcastQueueModernImpl](https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueModernImpl.java) |
+| android-16.0.0_r1 | ComputerEngine linked above | [BroadcastQueueImpl](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/am/BroadcastQueueImpl.java) |
+
+#### Device observations (2026-10-18, Asia/Singapore)
+
+PJX110, Android 16/API 36, security patch 2026-04-01, arm64, kernel
+`6.1.141-android14-11-o-gd2a6093d5589`. Package metadata reports HMA-OSS `oss-162`
+(versionCode 7304645); Duck Detector's blacklist scope is user-reported. Module configuration was
+not changed. Two consecutive scanner/export runs completed successfully through the generic
+DetectorRuntimeSmokeTest, with caller-package controls passing in each run:
+
+| Check | Observed result in each run |
+| --- | --- |
+| Broadcast cross-user exception | 124/124 catalog targets repeated; no exception mismatch |
+| getPackageInfo exception | 124/124 targets repeated; nine target package names had repeated exception mismatches |
+| getApplicationInfo exception | 124/124 targets repeated; the same nine target names had repeated exception mismatches |
+| Ordered-broadcast final result | 24/24 selected targets repeated; flags and payloads matched; overall catalog coverage remains partial (24/124) |
+| getpriority UID visibility | 10000/10000 UIDs checked; 87 then 86 task UIDs; the same eight UIDs repeatedly lacked visible package associations; no recheck failure or recheck-limit truncation |
+
+The nine queried names are behavior fingerprints, not proof that nine corresponding apps are
+installed. The eight UIDs do not identify hidden packages. These observations do not validate
+HMA-OSS 173's manual-resultTo positive case, a newer fixed test release, or an HMA-disabled/stock
+baseline. No enforced seccomp-denial profile was installed. Older Android releases and other ABIs have source/build coverage, not device coverage.
+
+Reproduce the runtime smoke check after building and installing the debug and androidTest APKs:
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb shell am instrument -w -r \
+  -e class com.eltavine.duckdetector.DetectorRuntimeSmokeTest \
+  -e detectorId dangerous_apps \
+  com.eltavine.duckdetector.test/androidx.test.runner.AndroidJUnitRunner
+adb logcat -d -s DetectorRuntimeSmoke:I
+```
+
+The context bootstrap instrumented test and MainActivity cold-launch smoke check also passed.
+The runtime harness uses AndroidX Test Runner 1.7.0 with the existing JUnit extension 1.3.0;
+[runner documentation](https://developer.android.com/training/testing/instrumented-tests/androidx-test-libraries/runner)
+and [release notes](https://developer.android.com/jetpack/androidx/releases/test) establish the
+runtime dependency. Twenty-five new JVM tests cover the control, failure and reduction rules.
+
+
+The following validation commands passed with the repository-pinned uihelper revision
+`18bed84a78dd811889ea1813d6954a988e44d688`:
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest unitTest :app:lintDebug buildHealth :sdk:aar:publish :sdk:aar:verifySdkAar
+./gradlew :build-logic:test
+./gradlew -p samples/sdk-consumer assembleDebug
+for s in .github/scripts/check-*.py; do python3 "$s" || exit 1; done
+```
+
+The SDK consumer is a separate build using only the published AAR and Maven dependencies. Both
+Debug and Release native library builds completed for arm64-v8a, armeabi-v7a, x86 and x86_64.

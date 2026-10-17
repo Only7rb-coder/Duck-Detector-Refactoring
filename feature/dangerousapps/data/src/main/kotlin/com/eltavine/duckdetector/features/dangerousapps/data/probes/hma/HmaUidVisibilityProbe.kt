@@ -23,6 +23,8 @@ import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousPackageV
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaBehaviorCheck
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckKind
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckState
+import com.eltavine.duckdetector.features.dangerousapps.domain.HmaUidVisibilityObservation
+import com.eltavine.duckdetector.features.dangerousapps.domain.HmaUidVisibilityPolicy
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 
@@ -70,17 +72,17 @@ internal class HmaUidVisibilityProbe(
                 stillUnassociated.getOrNull() == true) unassociated += uid
         }
         val after = runCatching { context.packageName in pm.getPackagesForUid(self).orEmpty() }.getOrDefault(false)
-        val state = when {
-            !before || !after -> HmaCheckState.INCONCLUSIVE
-            unassociated.isNotEmpty() -> HmaCheckState.INCONSISTENT
-            associationFailure -> HmaCheckState.INCONCLUSIVE
-            snapshot.status == HmaUidTaskBridge.PARTIAL || candidates > MAX_RECHECKS -> HmaCheckState.PARTIAL
-            else -> HmaCheckState.CONSISTENT
-        }
-        return HmaBehaviorCheck(kind, state,
-            "${snapshot.checked}/10000 ordinary app UIDs queried for this Android user; ${snapshot.tasks.size} task UID(s), " +
-                "${unassociated.size} repeatedly lacked a visible package association. This does not identify a hidden package or HMA.",
-            uids = if (before && after) unassociated else emptyList())
+        return HmaUidVisibilityPolicy.evaluate(HmaUidVisibilityObservation(
+            complete = snapshot.status == HmaUidTaskBridge.COMPLETE,
+            checked = snapshot.checked,
+            taskUids = snapshot.tasks.keys,
+            callerUid = self,
+            callerAssociationBefore = before,
+            callerAssociationAfter = after,
+            unassociated = unassociated,
+            verificationFailed = associationFailure,
+            verificationLimitReached = candidates > MAX_RECHECKS,
+        ))
     }
 
     private companion object { const val MAX_RECHECKS = 16 }

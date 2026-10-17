@@ -255,6 +255,7 @@ class DangerousAppsRepository(
         val behaviorChecks = hmaBehaviorProbe.run(
             packages = targets.map { it.packageName }.filter { it !in installedPackages },
             visibility = packageVisibility,
+            corroboratedPackages = hiddenFromPackageManager.mapTo(linkedSetOf()) { it.target.packageName },
         )
 
         return DangerousAppsReport(

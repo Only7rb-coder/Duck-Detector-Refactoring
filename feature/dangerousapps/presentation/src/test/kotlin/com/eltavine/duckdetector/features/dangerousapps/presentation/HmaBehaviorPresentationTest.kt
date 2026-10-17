@@ -42,6 +42,7 @@ class HmaBehaviorPresentationTest {
         val model = DangerousAppsCardModelMapper().map(report(HmaBehaviorCheck(
             HmaCheckKind.BROADCAST_RESULT_TO, HmaCheckState.UNAVAILABLE, "Service unavailable.")))
         assertTrue(model.context.any { it.value.contains("Unavailable") })
-        assertTrue(model.status.severity != DetectionSeverity.DANGER)
+        assertEquals(DetectionSeverity.INFO, model.status.severity)
+        assertEquals("Behavior checks incomplete", model.verdict)
     }
 }

@@ -64,6 +64,9 @@ data class HmaCallbackObservation(
 }
 
 object HmaBehaviorPolicy {
+    fun targetOrder(packages: List<String>, corroborated: Set<String>): List<String> =
+        packages.distinct().sortedBy { it !in corroborated }
+
     fun exceptions(
         kind: HmaCheckKind,
         before: HmaCallOutcome,
