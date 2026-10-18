@@ -20,6 +20,8 @@ package com.eltavine.duckdetector.ui
 import android.content.Context
 import androidx.lifecycle.ViewModelProvider
 import com.eltavine.duckdetector.BuildConfig
+import com.eltavine.duckdetector.features.update.data.createUpdateApkDownloader
+import com.eltavine.duckdetector.features.update.data.createUpdateApkInstaller
 import com.eltavine.duckdetector.features.update.data.createUpdateChannelPreference
 import com.eltavine.duckdetector.features.update.data.createUpdateChecker
 import com.eltavine.duckdetector.features.update.domain.UpdateChannel
@@ -35,5 +37,7 @@ internal fun updateViewModelFactory(context: Context): ViewModelProvider.Factory
         buildChannel = buildChannel,
         currentVersionCode = BuildConfig.VERSION_CODE,
         currentCommitSha = BuildConfig.BUILD_HASH,
+        downloader = createUpdateApkDownloader(appContext),
+        installer = createUpdateApkInstaller(appContext),
     )
 }

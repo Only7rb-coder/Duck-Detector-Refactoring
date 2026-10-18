@@ -17,6 +17,7 @@
 
 package com.eltavine.duckdetector.features.update.data
 
+import com.eltavine.duckdetector.features.update.domain.MAX_UPDATE_APK_BYTES
 import com.eltavine.duckdetector.features.update.domain.UpdateApk
 import com.eltavine.duckdetector.features.update.domain.UpdateChangelogEntry
 import com.eltavine.duckdetector.features.update.domain.UpdateChanges
@@ -110,10 +111,14 @@ class UpdateManifestParser {
         if (!SHA256_REGEX.matches(sha256)) {
             throw UpdateManifestValidationException("APK SHA-256 is invalid.")
         }
+        val sizeBytes = json.requirePositiveLong("sizeBytes")
+        if (sizeBytes > MAX_UPDATE_APK_BYTES) {
+            throw UpdateManifestValidationException("APK size exceeds the download limit.")
+        }
         return UpdateApk(
             name = name,
             downloadUrl = downloadUrl,
-            sizeBytes = json.requirePositiveLong("sizeBytes"),
+            sizeBytes = sizeBytes,
             sha256 = sha256,
         )
     }

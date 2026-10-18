@@ -253,6 +253,20 @@
         "operations"
       ],
       "reason": "Calls the hidden Keystore2 supplementary attestation info method through HiddenApiBypass."
+    },
+    {
+      "path": "feature/dangerousapps/data/src/main/kotlin/com/eltavine/duckdetector/features/dangerousapps/data/probes/hma/HmaPlatformCalls.kt",
+      "uses": [
+        "operations"
+      ],
+      "reason": "Invokes the hidden Context.sendBroadcastAsUser overload for a controlled permission-exception comparison; HiddenApiBypass.invoke adds no process-wide exemption."
+    },
+    {
+      "path": "feature/dangerousapps/data/src/main/kotlin/com/eltavine/duckdetector/features/dangerousapps/data/probes/hma/HmaUidPackageCalls.kt",
+      "uses": [
+        "operations"
+      ],
+      "reason": "Resolves the generated IPackageManager proxy and invokes UID-only permission and association methods without public-client caches. The adapter belongs to the package-visibility checks and does not change global hidden-API exemptions."
     }
   ]
 }

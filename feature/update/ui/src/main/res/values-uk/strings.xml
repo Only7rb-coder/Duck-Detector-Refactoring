@@ -29,7 +29,6 @@ limitations under the License.
     <string name="update_remaining_commits_unknown">Попередні коміти можуть бути не показані</string>
     <string name="update_later">Пізніше</string>
     <string name="update_view_changes">Переглянути всі зміни на GitHub</string>
-    <string name="update_download">Відкрити завантаження</string>
     <string name="update_dialog_title_stable">Доступне оновлення Stable</string>
     <string name="update_release_label">Випуск і коміт</string>
     <string name="update_apk_label">Розмір APK і SHA-256</string>
@@ -41,4 +40,8 @@ limitations under the License.
         <item quantity="other">Ще %1$d запису є на сторінці випуску</item>
     </plurals>
     <string name="update_view_release">Переглянути випуск на GitHub</string>
+    <string name="update_download">Завантажити</string>
+    <string name="update_download_progress">Завантаження %1$d%%</string>
+    <string name="update_download_retry">Повторити</string>
+    <string name="update_install">Встановити</string>
 </resources>

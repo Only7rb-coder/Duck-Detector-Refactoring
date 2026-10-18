@@ -47,9 +47,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.eltavine.duckdetector.features.update.domain.AvailableUpdate
 import com.eltavine.duckdetector.features.update.domain.UpdateChannel
+import com.eltavine.duckdetector.features.update.presentation.UpdateDownloadState
 import io.github.xiaotong6666.uihelper.adaptive.WrapSafeText
 import io.github.xiaotong6666.uihelper.mode.LocalUiMode
 import io.github.xiaotong6666.uihelper.mode.UiMode
+import kotlin.math.roundToInt
 
 /**
  * The waiting update in the dialog of the current UI style. The MIUIX dialog keeps showing [update]
@@ -60,14 +62,24 @@ fun UpdateDialog(
     show: Boolean,
     currentVersionName: String,
     update: AvailableUpdate,
-    downloadEnabled: Boolean,
+    downloadState: UpdateDownloadState,
     onDismiss: () -> Unit,
     onViewChanges: () -> Unit,
-    onDownload: () -> Unit,
+    onConfirm: () -> Unit,
     onDismissFinished: () -> Unit = {},
 ) {
+    val downloading = downloadState as? UpdateDownloadState.Downloading
+    val confirmLabel = when (downloadState) {
+        is UpdateDownloadState.Downloading -> stringResource(
+            R.string.update_download_progress, (downloadState.progress.fraction * 100f).roundToInt(),
+        )
+        is UpdateDownloadState.Ready -> stringResource(R.string.update_install)
+        is UpdateDownloadState.Failed -> stringResource(R.string.update_download_retry)
+        UpdateDownloadState.Idle -> stringResource(R.string.update_download)
+    }
     val stable = update.manifest.channel == UpdateChannel.STABLE
     val content = UpdateDialogContent(
+        confirmLabel = confirmLabel,
         title = stringResource(if (stable) R.string.update_dialog_title_stable else R.string.update_dialog_title),
         versionChange = stringResource(
             R.string.update_version_change,
@@ -82,20 +94,20 @@ fun UpdateDialog(
         UiMode.Miuix -> UpdateDialogMiuix(
             show = show,
             content = content,
-            downloadEnabled = downloadEnabled,
+            downloadEnabled = downloading == null,
             onDismiss = onDismiss,
             onViewChanges = onViewChanges,
-            onDownload = onDownload,
+            onDownload = onConfirm,
             onDismissFinished = onDismissFinished,
         )
 
         UiMode.Material -> if (show) {
             UpdateDialogMaterial(
                 content = content,
-                downloadEnabled = downloadEnabled,
+                downloadEnabled = downloading == null,
                 onDismiss = onDismiss,
                 onViewChanges = onViewChanges,
-                onDownload = onDownload,
+                onDownload = onConfirm,
             )
         }
     }
@@ -103,6 +115,7 @@ fun UpdateDialog(
 
 /** What both dialog styles show of an update. */
 internal class UpdateDialogContent(
+    val confirmLabel: String,
     val title: String,
     val versionChange: String,
     val details: List<UpdateDetail>,
@@ -171,6 +184,7 @@ private fun UpdateDialogMaterial(
                         )
                     }
                     UpdateDialogActionsMaterial(
+                        confirmLabel = content.confirmLabel,
                         downloadEnabled = downloadEnabled,
                         onDismiss = onDismiss,
                         onDownload = onDownload,
@@ -225,6 +239,7 @@ private fun UpdateDialogHeaderMaterial(title: String, versionChange: String) {
 
 @Composable
 private fun UpdateDialogActionsMaterial(
+    confirmLabel: String,
     downloadEnabled: Boolean,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
@@ -258,7 +273,7 @@ private fun UpdateDialogActionsMaterial(
                 modifier = Modifier.size(18.dp),
             )
             WrapSafeText(
-                text = stringResource(R.string.update_download),
+                text = confirmLabel,
                 modifier = Modifier.padding(start = 8.dp),
                 style = MaterialTheme.typography.labelLarge,
             )

@@ -101,7 +101,7 @@ internal fun UpdateDialogMiuix(
                     )
                     Spacer(Modifier.width(16.dp))
                     TextButton(
-                        text = stringResource(R.string.update_download),
+                        text = content.confirmLabel,
                         onClick = onDownload,
                         enabled = downloadEnabled,
                         modifier = Modifier.weight(1f),

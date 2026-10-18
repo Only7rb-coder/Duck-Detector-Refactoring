@@ -17,32 +17,27 @@
 
 package com.eltavine.duckdetector.features.update.ui
 
-import com.eltavine.duckdetector.features.update.domain.AvailableUpdate
-import com.eltavine.duckdetector.features.update.domain.UpdateApk
-import com.eltavine.duckdetector.features.update.domain.UpdateChangelog
-import com.eltavine.duckdetector.features.update.domain.UpdateChangelogEntry
-import com.eltavine.duckdetector.features.update.domain.UpdateChannel
-import com.eltavine.duckdetector.features.update.domain.UpdateChannelPreference
+import com.eltavine.duckdetector.features.update.domain.UpdateApkDownloader
+import com.eltavine.duckdetector.features.update.domain.UpdateApkInstaller
 import com.eltavine.duckdetector.features.update.domain.UpdateCheckResult
 import com.eltavine.duckdetector.features.update.domain.UpdateChecker
-import com.eltavine.duckdetector.features.update.domain.UpdateCommit
-import com.eltavine.duckdetector.features.update.domain.UpdateManifest
+import com.eltavine.duckdetector.features.update.domain.UpdateDownloadProgress
+import com.eltavine.duckdetector.features.update.domain.UpdateDownloadResult
+import com.eltavine.duckdetector.features.update.domain.UpdateInstallResult
 import com.eltavine.duckdetector.features.update.presentation.UpdateCheckStatus
 import com.eltavine.duckdetector.features.update.presentation.UpdateDownloadResolution
-import kotlinx.coroutines.CompletableDeferred
+import com.eltavine.duckdetector.features.update.presentation.UpdateDownloadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -50,27 +45,6 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class UpdateViewModelTest {
     private val dispatcher: TestDispatcher = StandardTestDispatcher()
-    private val manifest = UpdateManifest(
-        schemaVersion = 1,
-        channel = UpdateChannel.NIGHTLY,
-        branch = "master",
-        versionName = "2026.08.08-${TEST_HEAD_SHA.take(12)}",
-        versionCode = 500,
-        commit = UpdateCommit(
-            sha = TEST_HEAD_SHA,
-            subject = "feat(update): publish Nightly metadata",
-            body = "Publish metadata after the APK is available.",
-            authorName = "Duck Contributor",
-            authoredAt = "2026-08-08T12:20:00Z",
-        ),
-        builtAtUtc = "2026-08-08T12:30:00Z",
-        apk = UpdateApk(
-            name = "Duck.Detector-test.apk",
-            downloadUrl = "https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/nightly/Duck.Detector-test.apk",
-            sizeBytes = 12_345_678L,
-            sha256 = "c".repeat(64),
-        ),
-    )
 
     @Before
     fun setUp() {
@@ -88,7 +62,7 @@ class UpdateViewModelTest {
         val viewModel = viewModel(
             checker = UpdateChecker { _, _, _ ->
                 calls += 1
-                UpdateCheckResult.Current(manifest)
+                UpdateCheckResult.Current(testManifest)
             },
         )
 
@@ -97,7 +71,6 @@ class UpdateViewModelTest {
         advanceUntilIdle()
         assertEquals(1, calls)
         assertEquals(UpdateCheckStatus.CURRENT, viewModel.uiState.value.status)
-        assertEquals(manifest.versionName, viewModel.uiState.value.latestVersionName)
 
         viewModel.onSettingsUpdateAction()
         advanceUntilIdle()
@@ -168,12 +141,15 @@ class UpdateViewModelTest {
 
         val resolution = viewModel.resolveDownload()
 
-        assertEquals(UpdateDownloadResolution.Ready(manifest.apk.downloadUrl), resolution)
+        assertEquals(
+            UpdateDownloadResolution.Ready(availableUpdate()),
+            resolution,
+        )
     }
 
     @Test
     fun `download opens through the route of the check that resolves it`() = runTest(dispatcher) {
-        val proxiedUrl = "https://gh-proxy.com/${manifest.apk.downloadUrl}"
+        val proxiedUrl = "https://gh-proxy.com/${testManifest.apk.downloadUrl}"
         var calls = 0
         val viewModel = viewModel(
             checker = UpdateChecker { _, _, _ ->
@@ -188,17 +164,17 @@ class UpdateViewModelTest {
 
         val resolution = viewModel.resolveDownload()
 
-        assertEquals(UpdateDownloadResolution.Ready(proxiedUrl), resolution)
+        assertEquals(UpdateDownloadResolution.Ready(availableUpdate(downloadUrl = proxiedUrl)), resolution)
     }
 
     @Test
     fun `download resolution refreshes a superseded Nightly instead of opening its stale URL`() =
         runTest(dispatcher) {
-            val newerManifest = manifest.copy(
+            val newerManifest = testManifest.copy(
                 versionName = "2026.08.09-${NEWER_HEAD_SHA.take(12)}",
                 versionCode = 501,
-                commit = manifest.commit.copy(sha = NEWER_HEAD_SHA),
-                apk = manifest.apk.copy(
+                commit = testManifest.commit.copy(sha = NEWER_HEAD_SHA),
+                apk = testManifest.apk.copy(
                     name = "Duck.Detector-newer.apk",
                     downloadUrl =
                         "https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/nightly/Duck.Detector-newer.apk",
@@ -224,143 +200,71 @@ class UpdateViewModelTest {
         }
 
     @Test
-    fun `checks follow the stored channel and start from the build's`() = runTest(dispatcher) {
-        val channels = mutableListOf<UpdateChannel>()
+    fun `download verifies the resolved url and exposes a ready apk for install`() = runTest(dispatcher) {
+        val available = availableUpdate()
+        var downloadedUrl: String? = null
+        var installedPath: String? = null
         val viewModel = viewModel(
-            checker = UpdateChecker { channel, _, _ ->
-                channels += channel
-                UpdateCheckResult.Current(manifest)
+            checker = UpdateChecker { _, _, _ -> UpdateCheckResult.Available(available) },
+            downloader = UpdateApkDownloader { apk, url, _, onProgress ->
+                downloadedUrl = url
+                onProgress(UpdateDownloadProgress(bytesRead = apk.sizeBytes, totalBytes = apk.sizeBytes))
+                UpdateDownloadResult.Ready(apkPath = "/tmp/${apk.name}")
             },
-            preference = FakeChannelPreference(UpdateChannel.STABLE),
-            buildChannel = UpdateChannel.NIGHTLY,
+            installer = UpdateApkInstaller { path, _ ->
+                installedPath = path
+                UpdateInstallResult.Launched
+            },
         )
-
-        assertEquals(UpdateChannel.NIGHTLY, viewModel.uiState.value.channel)
         viewModel.checkAutomatically()
         advanceUntilIdle()
 
-        assertEquals(UpdateChannel.STABLE, viewModel.uiState.value.channel)
-        assertEquals(listOf(UpdateChannel.STABLE), channels)
+        viewModel.downloadUpdate()
+        advanceUntilIdle()
+
+        assertEquals(testManifest.apk.downloadUrl, downloadedUrl)
+        assertEquals(
+            UpdateDownloadState.Ready(testManifest, "/tmp/${testManifest.apk.name}"),
+            viewModel.uiState.value.download,
+        )
+        assertTrue(viewModel.uiState.value.isDialogVisible)
+
+        assertEquals(UpdateInstallResult.Launched, viewModel.installDownloaded())
+        assertEquals("/tmp/${testManifest.apk.name}", installedPath)
+        assertFalse(viewModel.uiState.value.isDialogVisible)
     }
 
     @Test
-    fun `choosing a channel stores it and checks it at once`() = runTest(dispatcher) {
-        val preference = FakeChannelPreference(UpdateChannel.NIGHTLY)
-        val channels = mutableListOf<UpdateChannel>()
+    fun `a failed download surfaces a retryable state`() = runTest(dispatcher) {
+        val available = availableUpdate()
         val viewModel = viewModel(
-            checker = UpdateChecker { channel, _, _ ->
-                channels += channel
-                if (channel == UpdateChannel.NIGHTLY) {
-                    UpdateCheckResult.Available(availableUpdate())
-                } else {
-                    UpdateCheckResult.Ahead(manifest.copy(channel = UpdateChannel.STABLE, versionName = "26.10.0"))
-                }
-            },
-            preference = preference,
+            checker = UpdateChecker { _, _, _ -> UpdateCheckResult.Available(available) },
+            downloader = UpdateApkDownloader { _, _, _, _ -> UpdateDownloadResult.Failed },
         )
         viewModel.checkAutomatically()
         advanceUntilIdle()
-        assertEquals(UpdateCheckStatus.AVAILABLE, viewModel.uiState.value.status)
 
-        viewModel.selectChannel(UpdateChannel.STABLE)
-        assertEquals(UpdateCheckStatus.CHECKING, viewModel.uiState.value.status)
-        assertNull(viewModel.uiState.value.availableUpdate)
+        viewModel.downloadUpdate()
         advanceUntilIdle()
 
-        assertEquals(UpdateChannel.STABLE, preference.stored)
-        assertEquals(listOf(UpdateChannel.NIGHTLY, UpdateChannel.STABLE), channels)
-        val state = viewModel.uiState.value
-        assertEquals(UpdateChannel.STABLE, state.channel)
-        assertEquals(UpdateCheckStatus.AHEAD, state.status)
-        assertEquals("26.10.0", state.latestVersionName)
-        assertFalse(state.isDialogVisible)
-
-        viewModel.selectChannel(UpdateChannel.STABLE)
-        advanceUntilIdle()
-        assertEquals(2, channels.size)
+        assertEquals(UpdateDownloadState.Failed(testManifest), viewModel.uiState.value.download)
+        assertTrue(viewModel.uiState.value.isDialogVisible)
     }
 
     @Test
-    fun `a choice made while the stored channel loads is kept`() = runTest(dispatcher) {
-        val loaded = CompletableDeferred<Unit>()
-        val slowPreference = object : UpdateChannelPreference {
-            var stored = UpdateChannel.STABLE
-
-            override suspend fun read(): UpdateChannel {
-                val value = stored
-                loaded.await()
-                return value
-            }
-
-            override suspend fun write(channel: UpdateChannel) {
-                stored = channel
-            }
-        }
+    fun `installing without a downloaded apk does nothing`() = runTest(dispatcher) {
+        val available = availableUpdate()
         val viewModel = viewModel(
-            checker = UpdateChecker { _, _, _ -> UpdateCheckResult.Current(manifest) },
-            preference = slowPreference,
-            buildChannel = UpdateChannel.STABLE,
+            checker = UpdateChecker { _, _, _ -> UpdateCheckResult.Available(available) },
         )
-        runCurrent()
-
-        viewModel.selectChannel(UpdateChannel.NIGHTLY)
-        advanceUntilIdle()
-        loaded.complete(Unit)
+        viewModel.checkAutomatically()
         advanceUntilIdle()
 
-        assertEquals(UpdateChannel.NIGHTLY, viewModel.uiState.value.channel)
-        assertEquals(UpdateChannel.NIGHTLY, slowPreference.stored)
-    }
-
-    private fun viewModel(
-        checker: UpdateChecker,
-        preference: UpdateChannelPreference = FakeChannelPreference(UpdateChannel.NIGHTLY),
-        buildChannel: UpdateChannel = UpdateChannel.NIGHTLY,
-    ): UpdateViewModel {
-        return UpdateViewModel(
-            repository = checker,
-            channelPreference = preference,
-            buildChannel = buildChannel,
-            currentVersionCode = 400,
-            currentCommitSha = TEST_BASE_SHA,
-            automaticCheckGate = SingleRunUpdateCheckGate(),
-        )
-    }
-
-    private fun availableUpdate(
-        updateManifest: UpdateManifest = manifest,
-        downloadUrl: String = updateManifest.apk.downloadUrl,
-    ): AvailableUpdate {
-        return AvailableUpdate(
-            manifest = updateManifest,
-            changelog = UpdateChangelog.Commits(
-                entries = listOf(
-                    UpdateChangelogEntry(
-                        sha = updateManifest.commit.sha,
-                        subject = updateManifest.commit.subject,
-                        authorName = updateManifest.commit.authorName,
-                    ),
-                ),
-                remainingCount = 0,
-            ),
-            downloadUrl = downloadUrl,
-            changesUrl =
-                "https://github.com/eltavine/Duck-Detector-Refactoring/compare/$TEST_BASE_SHA...${updateManifest.commit.sha}",
-        )
+        assertEquals(UpdateInstallResult.Failed, viewModel.installDownloaded())
+        assertTrue(viewModel.uiState.value.isDialogVisible)
     }
 
     private companion object {
         private const val NEWER_HEAD_SHA = "cccccccccccccccccccccccccccccccccccccccc"
     }
 }
-
-private class FakeChannelPreference(var stored: UpdateChannel) : UpdateChannelPreference {
-    override suspend fun read(): UpdateChannel = stored
-
-    override suspend fun write(channel: UpdateChannel) {
-        stored = channel
-    }
-}
-
-private const val TEST_HEAD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-private const val TEST_BASE_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

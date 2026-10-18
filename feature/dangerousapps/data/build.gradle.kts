@@ -27,7 +27,11 @@ dependencies {
     api(project(":capability:packageinventory:data"))
     api(project(":capability:packageinventory:domain"))
     api(project(":core:detector"))
+    implementation(project(":core:native"))
     implementation(project(":core:platform"))
     api(project(":feature:dangerousapps:domain"))
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.hiddenapibypass)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
