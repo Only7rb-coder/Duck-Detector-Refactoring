@@ -17,14 +17,32 @@ The Mount detector asks whether this app's mount view shows systemless root moun
 - Result states: hits, clean, unavailable.
 - Interpretation: root mounts and writable system partitions are danger.
 
+### Mount ID discontinuities
+
+- Observable signal: nonconsecutive IDs in adjacent mountinfo records immediately after `/apex/com.android.art` or before `/data_mirror`, including descending IDs. Retain both paths and IDs; do not count absent mounts from adjacent rows.
+- Producing subsystem: the kernel mount allocator and this process's mount namespace.
+- Mechanism: the allocator is global and releases IDs for reuse, while procfs iterates the selected namespace's mount list. Neither allocation nor record adjacency establishes a consecutive sequence for one process. A number between adjacent rows can also occur elsewhere in the same file.
+- References: primary sources pinned to inspected revisions:
+  - [ACK android14-5.15 `fs/namespace.c`](https://android.googlesource.com/kernel/common/+/9debaec240781879fbb65b9303f7cfc3e1d96c02/fs/namespace.c): `mnt_id_ida`, `mnt_alloc_id`, `mnt_free_id`.
+  - [ACK android14-6.1 `fs/namespace.c`](https://android.googlesource.com/kernel/common/+/48e3cd973485465613da6d71fa17139773546573/fs/namespace.c): the same allocator, plus `mnt_list_next`, `m_start`, `m_next`, and `copy_mnt_ns`.
+  - [ACK android15-6.6 `fs/namespace.c`](https://android.googlesource.com/kernel/common/+/150617c4d667a241e52441e855befac0c5d6702b/fs/namespace.c): the same allocation/release semantics.
+  - [ACK 6.1 procfs documentation, section 3.5](https://android.googlesource.com/kernel/common/+/48e3cd973485465613da6d71fa17139773546573/Documentation/filesystems/proc.rst): IDs identify mounts and may be reused after unmount.
+  - [ACK 6.1 `fs/proc_namespace.c`](https://android.googlesource.com/kernel/common/+/48e3cd973485465613da6d71fa17139773546573/fs/proc_namespace.c): `mounts_open_common` selects the task namespace and root; `show_mountinfo` emits mount IDs.
+  - [Android application sandbox](https://source.android.com/docs/security/app-sandbox) and [Android 14 Zygote](https://android.googlesource.com/platform/frameworks/base/+/299fe6f5d6fc6f1af7c3411dcf4e5efdf7217368/core/jni/com_android_internal_os_Zygote.cpp): `isolateAppData` mounts tmpfs over app data parents and binds app directories from `/data_mirror`; this is legitimate platform behavior.
+- Applicability: the inspected ACK branches and Android 14 source establish counterexamples to a universal continuity assumption. They do not identify an OEM device's exact sequence of allocations, releases, namespace cloning, or mount changes. These sources provide no consecutive-ID security contract or justified gap threshold.
+- Result states: informational observation or no local observation. Runtime separately reports mountinfo availability. The preload has no per-probe read/parse availability field, so an absent observation there does not establish successful collection. The shared routine only consumes parsed entries.
+- Interpretation: INFO only, regardless of interval size or repeated startup/runtime captures. These captures are not independent corroboration. Historical field and finding IDs containing `loophole` are retained for payload compatibility; the displayed label is `Mount ID discontinuity`. Legacy DANGER records are also interpreted as INFO.
+- Visibility limits: discontinuities cannot establish root, hiding, or a clean device. A contiguous list does not exclude hidden mounts. The origin of specific IDs requires a contemporaneous complete namespace snapshot and device/build/kernel context; a screenshot is insufficient.
+- Validation: `python3 core/native/src/test/python/test_mount_id_observation.py` checks the shared native policy, including 1/2/3/8/16 intervals, IDs visible elsewhere, descending/reused IDs, integer boundaries, and absent anchors. Mount repository, preload result, and card mapper unit tests verify that observations and denied coverage do not raise risk, while independent direct artifacts and statx contradiction classifications remain intact. These are synthetic regressions, not captured stock/OEM device validation.
+
 ### Cross-view consistency
 
-- Observable signal: mount ID gaps, peer group gaps, minor device gaps, statx mount IDs and mount-root attributes that disagree with mountinfo, and namespace identity versus init.
+- Observable signal: peer group gaps, minor device gaps, statx mount IDs and mount-root attributes that disagree with mountinfo, and namespace identity versus init.
 - Producing subsystem: the kernel's mount ID allocator, statx and namespace links.
-- Mechanism: unmounting hidden entries leaves gaps and contradictions between independently exposed views.
+- Mechanism: statx and mountinfo can expose differing mount identities; allocator gaps alone do not establish such a contradiction. Peer/minor group heuristics are separate signals and are not strengthened by mount ID discontinuities.
 - References: kernel/common Documentation/filesystems/proc.rst (mountinfo mount IDs and propagation); kernel/common include/uapi/linux/stat.h (STATX_MNT_ID and STATX_ATTR_MOUNT_ROOT).
 - Applicability: statx needs a kernel that fills the mount ID fields; /proc/1/ns/mnt is readable only where SELinux allows it.
-- Visibility limits: an app shares init's namespace only when zygote isolation failed, so a different namespace is expected.
+- Visibility limits: a different app/init mount namespace is compatible with ordinary Zygote isolation. Namespace identity or access denial alone does not establish root.
 - Result states: anomaly, mount root, review, clean, unsupported, unavailable.
 - Interpretation: contradictions between kernel views are danger; a mount-root attribute on a system subdirectory is a warning.
 
@@ -46,6 +64,6 @@ The Mount detector asks whether this app's mount view shows systemless root moun
 - Mechanism: hiding applied after launch leaves differences between the early and later views.
 - References: capability/earlypreload/EVIDENCE.md for the capture; system/core rootdir/init.rc for /data/local/tmp. Discovery only for busybox and hybrid mount paths.
 - Applicability: the preload needs the transparent launcher; SDK hosts without it report it unavailable.
-- Visibility limits: denied path checks are counted, not read as absent.
+- Visibility limits: denied path checks and inaccessible init namespace links describe partial coverage. They are informational regardless of their count and do not corroborate root or mount hiding.
 - Result states: hits, signals, busybox, clean, partial, unavailable.
 - Interpretation: path and preload hits follow their finding severity; busybox alone is a warning.

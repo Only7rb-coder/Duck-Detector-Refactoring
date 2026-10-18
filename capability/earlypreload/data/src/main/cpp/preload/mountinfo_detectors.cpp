@@ -16,6 +16,7 @@
  */
 
 #include "preload/early_detector.h"
+#include "common/mount_id_observation.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -24,7 +25,7 @@
 #include <string>
 #include <vector>
 
-// The early detectors that read the topology of /proc/self/mountinfo: mount ID continuity, tmpfs
+// The early detectors that read the topology of /proc/self/mountinfo: mount ID observations, tmpfs
 // minor device numbering and peer group numbering.
 namespace duckdetector::preload {
 
@@ -42,13 +43,6 @@ namespace duckdetector::preload {
             std::string fsType;
             std::string source;
             std::string superOptions;
-        };
-
-        struct MountIdGapSummary {
-            bool reachedDataUserBoundary = false;
-            int missingCount = 0;
-            int firstMissingStart = 0;
-            int firstMissingEnd = 0;
         };
 
         bool parse_mountinfo_line(const std::string &line, MountInfoEntry &entry) {
@@ -140,92 +134,15 @@ namespace duckdetector::preload {
             return false;
         }
 
-        bool summarize_data_mirror_mount_id_gap(
-                const std::vector<MountInfoEntry> &mounts,
-                std::size_t dataMirrorIndex,
-                MountIdGapSummary &summary
-        ) {
-            if (dataMirrorIndex == 0 || dataMirrorIndex >= mounts.size()) {
-                return false;
-            }
-
-            int currentId = mounts[dataMirrorIndex].id;
-            for (int scanIndex = static_cast<int>(dataMirrorIndex) - 1;
-                 scanIndex >= 0 && currentId - mounts[static_cast<std::size_t>(scanIndex)].id < 10;
-                 --scanIndex) {
-                const auto &candidate = mounts[static_cast<std::size_t>(scanIndex)];
-                if (candidate.id == currentId - 1) {
-                    currentId = candidate.id;
-                    if (candidate.target.starts_with("/data/user")) {
-                        summary.reachedDataUserBoundary = true;
-                        break;
-                    }
-                    continue;
-                }
-
-                const int gapSize = currentId - candidate.id - 1;
-                if (gapSize <= 0) {
-                    continue;
-                }
-
-                if (summary.firstMissingStart == 0) {
-                    summary.firstMissingStart = candidate.id + 1;
-                    summary.firstMissingEnd = currentId - 1;
-                }
-                summary.missingCount += gapSize;
-                currentId = candidate.id;
-
-                if (candidate.target.starts_with("/data/user")) {
-                    summary.reachedDataUserBoundary = true;
-                    break;
-                }
-            }
-
-            // Single and double missing IDs show up on some stock devices from transient
-            // teardown or short-lived remount churn; only treat the /data_mirror chain as
-            // anomalous once the local walk shows a larger multi-ID gap and we reached the
-            // expected /data/user boundary.
-            return summary.reachedDataUserBoundary && summary.missingCount >= 3;
-        }
-
     }  // namespace
 
     bool detect_mount_id_loophole(EarlyMountPreloadResult &result) {
-        const auto mounts = parse_mountinfo();
-        bool detected = false;
-
-        for (std::size_t index = 0; index < mounts.size(); ++index) {
-            const auto &mount = mounts[index];
-            if (mount.target == "/apex/com.android.art" && index + 1 < mounts.size()) {
-                const auto &next = mounts[index + 1];
-                if (next.id > mount.id + 1) {
-                    detected = true;
-                    result.mountIdGapDetected = true;
-                    result.findings.push_back(
-                            "MOUNT_ID_GAP|Gap after /apex/com.android.art: expected " +
-                            std::to_string(mount.id + 1) + ", got " + std::to_string(next.id) +
-                            "|DANGER"
-                    );
-                }
-            }
-
-            if (mount.target == "/data_mirror") {
-                MountIdGapSummary summary;
-                if (summarize_data_mirror_mount_id_gap(mounts, index, summary)) {
-                    detected = true;
-                    result.mountIdGapDetected = true;
-                    result.findings.push_back(
-                            "MOUNT_ID_GAP|Missing " + std::to_string(summary.missingCount) +
-                            " mount IDs before /data_mirror (first gap " +
-                            std::to_string(summary.firstMissingStart) + "-" +
-                            std::to_string(summary.firstMissingEnd) + ")|DANGER"
-                    );
-                }
-                break;
-            }
+        const auto observations = common::observe_mount_id_discontinuities(parse_mountinfo());
+        result.mountIdGapDetected = !observations.empty();
+        for (const auto &observation: observations) {
+            result.findings.push_back("MOUNT_ID_GAP|" + observation.detail() + "|INFO");
         }
-
-        return detected;
+        return result.mountIdGapDetected;
     }
 
     bool detect_minor_dev_gap(EarlyMountPreloadResult &result) {

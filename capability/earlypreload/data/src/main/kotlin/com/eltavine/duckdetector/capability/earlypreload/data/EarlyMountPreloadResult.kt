@@ -100,7 +100,7 @@ public data class EarlyMountPreloadResult(
         get() = activeSignals.size
 
     val hasDangerSignal: Boolean
-        get() = futileHideDetected || mntStringsDetected || mountIdGapDetected
+        get() = futileHideDetected || mntStringsDetected
 
     val hasWarningSignal: Boolean
         get() = minorDevGapDetected || peerGroupGapDetected
@@ -130,9 +130,23 @@ public data class EarlyMountPreloadResult(
             }
         }
         val resolvedFindings = if (findings.isNotEmpty()) {
-            findings.distinct()
+            findings.map { finding ->
+                val fields = finding.split('|')
+                if (fields.size == 3 && fields[0] == EarlyMountPreloadSignal.MOUNT_ID_GAP.key) {
+                    "${fields[0]}|${fields[1]}|INFO"
+                } else {
+                    finding
+                }
+            }.distinct()
         } else {
-            resolvedSignals.map { "${it.key}|${it.label}|${if (it == EarlyMountPreloadSignal.MINOR_DEV_GAP || it == EarlyMountPreloadSignal.PEER_GROUP_GAP) "WARNING" else "DANGER"}" }
+            resolvedSignals.map {
+                val severity = when (it) {
+                    EarlyMountPreloadSignal.MOUNT_ID_GAP -> "INFO"
+                    EarlyMountPreloadSignal.MINOR_DEV_GAP, EarlyMountPreloadSignal.PEER_GROUP_GAP -> "WARNING"
+                    else -> "DANGER"
+                }
+                "${it.key}|${it.label}|$severity"
+            }
         }
         return copy(
             detected = resolvedDetected,

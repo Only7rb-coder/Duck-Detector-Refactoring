@@ -16,6 +16,7 @@
  */
 
 #include "mount/detector_core.h"
+#include "common/mount_id_observation.h"
 #include "mount/detector_internal.h"
 #include <android/log.h>
 #include <fcntl.h>
@@ -198,8 +199,7 @@ namespace duckdetector::mount::detail {
 
         int dataDataMountId = -1;
 
-        for (size_t index = 0; index < entries.size(); ++index) {
-            const MountInfoEntry &entry = entries[index];
+        for (const MountInfoEntry &entry: entries) {
             const std::string optionalJoined = join_optional_fields(entry.optionalFields);
             const std::string lowerOptional = lowercase_copy(optionalJoined);
             const std::string lowerSuper = lowercase_copy(entry.superOptions);
@@ -254,39 +254,20 @@ namespace duckdetector::mount::detail {
                         : optionalJoined
                 );
             }
+        }
 
-            if (entry.target == "/apex/com.android.art" && index + 1 < entries.size() &&
-                entries[index + 1].id > entry.id + 1) {
-                snapshot.mountIdLoopholeDetected = true;
-                add_finding(
-                        snapshot,
-                        dedupe,
-                        "CONSISTENCY",
-                        "DANGER",
-                        "Mount ID loophole",
-                        "Gap after ART",
-                        "Expected next ID " + std::to_string(entry.id + 1) + ", got " +
-                        std::to_string(entries[index + 1].id)
-                );
-            }
-
-            if (entry.target == "/data_mirror" && index > 0) {
-                const MountInfoEntry &previous = entries[index - 1];
-                if (previous.id + 1 != entry.id &&
-                    previous.target.find("/data/user") == std::string::npos) {
-                    snapshot.mountIdLoopholeDetected = true;
-                    add_finding(
-                            snapshot,
-                            dedupe,
-                            "CONSISTENCY",
-                            "DANGER",
-                            "Mount ID loophole",
-                            "Gap before /data_mirror",
-                            "Previous mount " + previous.target + " has ID " +
-                            std::to_string(previous.id)
-                    );
-                }
-            }
+        const auto observations = common::observe_mount_id_discontinuities(entries);
+        snapshot.mountIdLoopholeDetected = !observations.empty();
+        for (const auto &observation: observations) {
+            add_finding(
+                    snapshot,
+                    dedupe,
+                    "CONSISTENCY",
+                    "INFO",
+                    "Mount ID discontinuity",
+                    "Observed",
+                    observation.detail()
+            );
         }
 
 #ifdef __NR_statx

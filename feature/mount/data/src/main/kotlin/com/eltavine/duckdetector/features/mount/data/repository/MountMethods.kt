@@ -49,7 +49,6 @@ internal fun buildMethods(
     ).count { it }
     val infoDanger = listOf(
         snapshot.inconsistentMountDetected,
-        snapshot.mountIdLoopholeDetected,
         snapshot.statxMntIdMismatch,
         snapshot.bindMountDetected,
         snapshot.mountOptionsAnomaly,
@@ -68,12 +67,14 @@ internal fun buildMethods(
                 !preloadResult.available -> "Unavailable"
                 preloadResult.hasDangerSignal -> "${preloadResult.findingCount} hit(s)"
                 preloadResult.hasWarningSignal -> "${preloadResult.findingCount} signal(s)"
+                preloadResult.mountIdGapDetected -> "Observation"
                 else -> "Clean"
             },
             outcome = when {
                 !preloadResult.available -> MountMethodOutcome.SUPPORT
                 preloadResult.hasDangerSignal -> MountMethodOutcome.DANGER
                 preloadResult.hasWarningSignal -> MountMethodOutcome.WARNING
+                preloadResult.mountIdGapDetected -> MountMethodOutcome.SUPPORT
                 else -> MountMethodOutcome.CLEAN
             },
             detail = "Transparent NativeActivity launcher runs early namespace and mount checks before MainActivity starts.",
@@ -84,12 +85,14 @@ internal fun buildMethods(
             summary = when {
                 pathDanger > 0 -> "$pathDanger hit(s)"
                 snapshot.busyboxDetected -> "Busybox"
+                snapshot.permissionDenied > 0 -> "Partial"
                 snapshot.permissionTotal > 0 -> "Clean"
                 else -> "Partial"
             },
             outcome = when {
                 pathDanger > 0 -> MountMethodOutcome.DANGER
                 snapshot.busyboxDetected -> MountMethodOutcome.WARNING
+                snapshot.permissionDenied > 0 -> MountMethodOutcome.SUPPORT
                 snapshot.permissionTotal > 0 -> MountMethodOutcome.CLEAN
                 else -> MountMethodOutcome.SUPPORT
             },
@@ -145,12 +148,14 @@ internal fun buildMethods(
                 !snapshot.mountInfoReadable -> "Unavailable"
                 infoDanger > 0 -> "$infoDanger hit(s)"
                 snapshot.mountPropagationAnomaly || snapshot.namespaceAnomalyDetected -> "Review"
+                snapshot.mountIdLoopholeDetected -> "Observation"
                 else -> "Clean"
             },
             outcome = when {
                 !snapshot.mountInfoReadable -> MountMethodOutcome.SUPPORT
                 infoDanger > 0 -> MountMethodOutcome.DANGER
                 snapshot.mountPropagationAnomaly || snapshot.namespaceAnomalyDetected -> MountMethodOutcome.WARNING
+                snapshot.mountIdLoopholeDetected -> MountMethodOutcome.SUPPORT
                 else -> MountMethodOutcome.CLEAN
             },
             detail = "Mountinfo root-field, propagation, mount-ID, and namespace-consistency checks.",

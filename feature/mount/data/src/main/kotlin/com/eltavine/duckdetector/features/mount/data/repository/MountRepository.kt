@@ -72,10 +72,7 @@ class MountRepository(
                 zygoteNext = zygoteNext,
             )
         }
-        val preloadResult = sanitizePreloadResult(
-            result = preloadResultProvider(),
-            snapshot = snapshot,
-        )
+        val preloadResult = preloadResultProvider()
         val shellTmpResult = shellTmpConcealmentProbe.run()
         if (!snapshot.available) {
             return buildFailedReport(
@@ -172,7 +169,7 @@ class MountRepository(
                     ),
                 )
             }
-            if (snapshot.mountIdLoopholeDetected || snapshot.inconsistentMountDetected || snapshot.statxMntIdMismatch || snapshot.statxMountRootAnomaly) {
+            if (snapshot.inconsistentMountDetected || snapshot.statxMntIdMismatch || snapshot.statxMountRootAnomaly) {
                 add(
                     MountImpact(
                         text = "Mount-info and statx contradictions are harder to explain away than a single suspicious path because different kernel-visible mount views disagree.",

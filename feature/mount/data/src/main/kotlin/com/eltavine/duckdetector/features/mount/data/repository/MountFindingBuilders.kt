@@ -66,12 +66,8 @@ internal fun MountRepository.buildFindings(
                     label = "Path coverage",
                     value = "${coveragePercent(snapshot)}%",
                     group = MountFindingGroup.CONSISTENCY,
-                    severity = if (snapshot.permissionDenied * 2 >= snapshot.permissionTotal) {
-                        MountFindingSeverity.WARNING
-                    } else {
-                        MountFindingSeverity.INFO
-                    },
-                    detail = "Accessible checks: ${snapshot.permissionAccessible}/${snapshot.permissionTotal}. Permission-denied checks: ${snapshot.permissionDenied}.",
+                    severity = MountFindingSeverity.INFO,
+                    detail = "Accessible checks: ${snapshot.permissionAccessible}/${snapshot.permissionTotal}. Permission-denied checks: ${snapshot.permissionDenied}. Restricted visibility is not evidence of root.",
                 ),
             )
         }
