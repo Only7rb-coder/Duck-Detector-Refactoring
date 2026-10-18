@@ -1,5 +1,8 @@
 # Installer permission-owner observation
 
+Detection-vector credit: [FldBudin](https://github.com/FldBudin) (GitHub), for the
+installer duplicate-permission owner-discovery approach.
+
 ## Question and evidence
 
 Can an ordinary application obtain the declaring package of the fixed KernelSU permission

@@ -125,6 +125,9 @@ file-system methods are the independent path.
 
 ### Optional installer permission-owner observation
 
+Detection-vector credit: [FldBudin](https://github.com/FldBudin) (GitHub), for the
+installer duplicate-permission owner-discovery approach.
+
 - Observable signal: an installer failure names the owner of the fixed candidate KernelSU permission.
 - Producing subsystem: PackageManager global permission registry and InstallPackageHelper.
 - Mechanism: a signed self-update canary reaches the permission conflict check, with a missing
