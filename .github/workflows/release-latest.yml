@@ -101,8 +101,8 @@ jobs:
           fi
           git checkout --quiet --detach "refs/tags/${tag_name}"
 
-          if [ "${tag_name}" = "nightly" ]; then
-            echo "The nightly tag is reserved for the mutable update channel in build.yml." >&2
+          if [ "${tag_name}" = "update" ]; then
+            echo "The update tag is reserved for the mutable update channel in build.yml." >&2
             exit 1
           fi
 

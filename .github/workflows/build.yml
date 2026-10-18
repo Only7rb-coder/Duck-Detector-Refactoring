@@ -529,8 +529,8 @@ jobs:
         env:
           APK_PATH: ${{ steps.nightly_artifacts.outputs.apk_path }}
           AAR_PATH: ${{ steps.nightly_artifacts.outputs.aar_path }}
-          # Keep publishing the legacy value until pre-migration clients have upgraded.
-          NIGHTLY_MANIFEST_BRANCH: master
+          # Schema v1 accepts the current default branch.
+          NIGHTLY_MANIFEST_BRANCH: main
           BUILD_TIME_ISO: ${{ steps.build.outputs.build_time_iso }}
           NIGHTLY_TAG: ${{ steps.nightly.outputs.tag }}
           RELEASE_ASSETS_JSON: ${{ steps.nightly_release.outputs.assets }}
@@ -580,30 +580,23 @@ jobs:
           aar_asset = aar_assets[0]
           apk_asset_id = apk_asset.get("id")
           apk_name = apk_asset.get("name", "")
-          apk_url = apk_asset.get("browser_download_url", "")
           if not isinstance(apk_asset_id, int) or apk_asset_id <= 0:
               raise SystemExit(f"Release action returned an invalid APK asset id: {apk_asset_id!r}")
           if apk_asset.get("state") != "uploaded":
               raise SystemExit(f"APK release asset is not uploaded: {apk_asset.get('state')!r}")
           if not isinstance(apk_name, str) or not apk_name.lower().endswith(".apk"):
               raise SystemExit(f"Release action returned an invalid APK asset name: {apk_name!r}")
-          if not isinstance(apk_url, str):
-              raise SystemExit("Release action did not return an APK download URL.")
-
-          apk_draft_url = apk_url
-          apk_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], apk_name, apk_url)
+          apk_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], apk_name)
 
           aar_asset_id = aar_asset.get("id")
           aar_name = aar_asset.get("name", "")
-          aar_url = aar_asset.get("browser_download_url", "")
           if not isinstance(aar_asset_id, int) or aar_asset_id <= 0:
               raise SystemExit(f"Release action returned an invalid SDK AAR asset id: {aar_asset_id!r}")
           if aar_asset.get("state") != "uploaded":
               raise SystemExit(f"SDK AAR release asset is not uploaded: {aar_asset.get('state')!r}")
           if not isinstance(aar_name, str) or not aar_name.lower().endswith(".aar"):
               raise SystemExit(f"Release action returned an invalid SDK AAR asset name: {aar_name!r}")
-          aar_draft_url = aar_url
-          aar_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], aar_name, aar_url)
+          aar_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], aar_name)
           aar_size = aar_path.stat().st_size
           if aar_asset.get("size") != aar_size:
               raise SystemExit(
@@ -662,8 +655,6 @@ jobs:
               output.write(f"apk_asset_id={apk_asset_id}\n")
               output.write(f"aar_asset_id={aar_asset_id}\n")
               output.write(f"aar_public_url={aar_url}\n")
-              output.write(f"apk_draft_url={apk_draft_url}\n")
-              output.write(f"aar_draft_url={aar_draft_url}\n")
           PY
 
           jq -e '
@@ -708,128 +699,16 @@ jobs:
         shell: bash
         env:
           AAR_ASSET_ID: ${{ steps.update_manifest.outputs.aar_asset_id }}
-          AAR_NAME: ${{ steps.nightly_artifacts.outputs.aar_name }}
           AAR_PATH: ${{ steps.nightly_artifacts.outputs.aar_path }}
           APK_ASSET_ID: ${{ steps.update_manifest.outputs.apk_asset_id }}
-          APK_NAME: ${{ steps.update_manifest.outputs.apk_name }}
+          APK_PATH: ${{ steps.nightly_artifacts.outputs.apk_path }}
           APK_RELEASE_ID: ${{ steps.nightly_release.outputs.id }}
-          EXPECTED_AAR_URL: ${{ steps.update_manifest.outputs.aar_draft_url }}
-          EXPECTED_APK_URL: ${{ steps.update_manifest.outputs.apk_draft_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MANIFEST_ASSETS_JSON: ${{ steps.nightly_manifest_release.outputs.assets }}
+          MANIFEST_PATH: ${{ steps.update_manifest.outputs.manifest_path }}
           MANIFEST_RELEASE_ID: ${{ steps.nightly_manifest_release.outputs.id }}
-        run: |
-          set -euo pipefail
-
-          gh_api_get() {
-            local endpoint="$1"
-            local error_file="$RUNNER_TEMP/gh-api-get-error"
-            local response
-            for attempt in 1 2 3 4; do
-              if response=$(gh api "$endpoint" 2>"$error_file"); then
-                printf '%s' "$response"
-                return 0
-              fi
-              if [ "$attempt" -eq 4 ]; then
-                cat "$error_file" >&2
-                return 1
-              fi
-              echo "GitHub API GET failed (attempt ${attempt}/4); retrying..." >&2
-              sleep $((attempt * 2))
-            done
-          }
-
-          download_release_asset() {
-            local asset_id="$1"
-            local destination="$2"
-            local error_file="$RUNNER_TEMP/gh-api-download-error"
-            for attempt in 1 2 3 4; do
-              if gh api \
-                -H "Accept: application/octet-stream" \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
-                >"$destination" 2>"$error_file" && [ -s "$destination" ]; then
-                return 0
-              fi
-              if [ "$attempt" -eq 4 ]; then
-                cat "$error_file" >&2
-                return 1
-              fi
-              echo "Release asset download failed (attempt ${attempt}/4); retrying..." >&2
-              sleep $((attempt * 2))
-            done
-          }
-
-          if ! [[ "$APK_ASSET_ID" =~ ^[0-9]+$ && "$AAR_ASSET_ID" =~ ^[0-9]+$ && "$APK_RELEASE_ID" =~ ^[0-9]+$ && "$MANIFEST_RELEASE_ID" =~ ^[0-9]+$ ]]; then
-            echo "Release action returned an invalid asset or release id." >&2
-            exit 1
-          fi
-          if [ "$APK_RELEASE_ID" != "$MANIFEST_RELEASE_ID" ]; then
-            echo "APK, SDK AAR and manifest were uploaded to different releases." >&2
-            exit 1
-          fi
-
-          if ! jq -e '
-            type == "array" and
-            length == 1 and
-            .[0].name == "update.json" and
-            .[0].state == "uploaded" and
-            (.[0].id | type == "number" and . > 0)
-          ' <<<"$MANIFEST_ASSETS_JSON" >/dev/null; then
-            echo "Manifest release action returned unexpected asset metadata." >&2
-            exit 1
-          fi
-          manifest_asset_id=$(jq -r '.[0].id' <<<"$MANIFEST_ASSETS_JSON")
-
-          expected_apk_size=$(jq -r '.apk.sizeBytes' update.json)
-          expected_apk_digest="sha256:$(jq -r '.apk.sha256' update.json)"
-          apk_asset_json=$(gh_api_get "repos/${GITHUB_REPOSITORY}/releases/assets/${APK_ASSET_ID}")
-          if ! jq -e \
-            --arg name "$APK_NAME" \
-            --arg url "$EXPECTED_APK_URL" \
-            --arg digest "$expected_apk_digest" \
-            --argjson size "$expected_apk_size" \
-            '.name == $name and
-             .browser_download_url == $url and
-             .state == "uploaded" and
-             .size == $size and
-             (.digest == null or (.digest | ascii_downcase) == $digest)' \
-            <<<"$apk_asset_json" >/dev/null; then
-            echo "Published APK metadata does not match the generated manifest." >&2
-            exit 1
-          fi
-
-          expected_aar_size=$(stat -c '%s' "$AAR_PATH")
-          expected_aar_digest="sha256:$(sha256sum "$AAR_PATH" | cut -d' ' -f1)"
-          aar_asset_json=$(gh_api_get "repos/${GITHUB_REPOSITORY}/releases/assets/${AAR_ASSET_ID}")
-          if ! jq -e \
-            --arg name "$AAR_NAME" \
-            --arg url "$EXPECTED_AAR_URL" \
-            --arg digest "$expected_aar_digest" \
-            --argjson size "$expected_aar_size" \
-            '.name == $name and
-             .browser_download_url == $url and
-             .state == "uploaded" and
-             .size == $size and
-             (.digest == null or (.digest | ascii_downcase) == $digest)' \
-            <<<"$aar_asset_json" >/dev/null; then
-            echo "Published SDK AAR metadata does not match the built artifact." >&2
-            exit 1
-          fi
-
-          manifest_asset_json=$(gh_api_get "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_asset_id}")
-          if ! jq -e '.name == "update.json" and .state == "uploaded" and .size > 0' \
-            <<<"$manifest_asset_json" >/dev/null; then
-            echo "Published manifest asset metadata is invalid." >&2
-            exit 1
-          fi
-
-          download_release_asset "$manifest_asset_id" published-update.json
-          if ! cmp --silent update.json published-update.json; then
-            echo "Published Nightly manifest differs from the generated manifest." >&2
-            echo "Expected SHA-256: $(sha256sum update.json | cut -d' ' -f1)" >&2
-            echo "Actual SHA-256:   $(sha256sum published-update.json | cut -d' ' -f1)" >&2
-            exit 1
-          fi
+          NIGHTLY_TAG: ${{ steps.nightly.outputs.tag }}
+        run: python3 .github/scripts/nightly_release.py verify
 
       - name: Publish verified Nightly draft
         if: github.ref_name == github.event.repository.default_branch && steps.nightly.outputs.publish == 'true'

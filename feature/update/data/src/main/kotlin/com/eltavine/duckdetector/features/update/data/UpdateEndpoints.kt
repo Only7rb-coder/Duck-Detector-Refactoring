@@ -23,8 +23,7 @@ internal object UpdateEndpoints {
     const val REPOSITORY_PATH = "/eltavine/Duck-Detector-Refactoring"
     const val WEB_REPOSITORY = "https://github.com$REPOSITORY_PATH"
     const val API_REPOSITORY = "https://api.github.com/repos/eltavine/Duck-Detector-Refactoring"
-    const val NIGHTLY_TAG = "nightly"
-    const val NIGHTLY_MANIFEST_URL = "$WEB_REPOSITORY/releases/download/$NIGHTLY_TAG/update.json"
+    const val NIGHTLY_MANIFEST_URL = "$WEB_REPOSITORY/releases/download/update/update.json"
 
     /**
      * GitHub redirects this to the newest published full release. The Nightly release is a

@@ -5,7 +5,7 @@ Duck Detector publishes two channels, both built from `main` and signed with the
 | Channel | Workflow | Version name | Manifest the app reads |
 | --- | --- | --- | --- |
 | Stable | `release-latest.yml`, on a stable tag | `26.10.0` | `releases/latest/download/update.json` |
-| Nightly | `build.yml`, on every push to `main` | `26.10.0-nightly.5+1a2b3c4d` | `releases/download/nightly/update.json` |
+| Nightly | `build.yml`, on every push to `main` | `26.10.0-nightly.5+1a2b3c4d` | `releases/download/update/update.json` |
 
 A Nightly version names the last stable release behind it and the number of first-parent commits
 since; before the first stable tag, Nightly builds keep their dated `2026.09.30-<hash>` name. Both
@@ -57,8 +57,9 @@ stable tag; the workflow never creates a tag from a branch head.
 
 ## Nightly releases
 
-Every push to `main` replaces the assets of the `nightly` prerelease. Its release note and the
-`changes` in its `update.json` list the first-parent changes since the last stable tag, newest
+Every push to `main` publishes a separate immutable Nightly archive and advances only the
+JSON asset of the fixed `update` prerelease. The archive release note and the `changes` in its
+`update.json` list the first-parent changes since the last stable tag, newest
 first, so the app can tell what a newer Nightly adds to the build it runs without GitHub's compare
 API, which gh-proxy.com cannot relay. `.github/scripts/release_changes.py` collects them and
 `.github/scripts/release_manifest.py` writes and validates the manifest for both channels.
@@ -86,60 +87,78 @@ build logic.
 
 ## Release immutability
 
-Enable the repository's **Release immutability** setting. All newly published releases,
-including stable releases and Nightly archives, must report `immutable: true`. Both workflows
-verify this state after publication. Stable publication does not overwrite existing assets.
+Keep the repository's **Release immutability** setting enabled. Stable releases and Nightly
+archives must report `immutable: true` after publication; both workflows verify this state.
+Published assets and tags are never replaced. Only the fixed `update` prerelease is mutable.
+The stable workflow rejects the reserved literal `update` tag.
 
-The existing, already published `nightly` prerelease is the only mutable exception. GitHub's
-setting applies to future publications, so this pre-existing release remains mutable. Never
-unpublish, delete, recreate or republish it; recreating it under the enabled policy would lock
-its update assets and tag. Channel updates modify assets and notes without a draft transition.
-The Nightly workflow stops if this channel is missing, unpublished or immutable, rather than
-attempting to recreate it. The stable workflow rejects the reserved literal `nightly` tag.
+GitHub has no per-tag exclusion setting. The `update` entry must therefore be created once
+by a repository administrator while the repository policy is disabled, before enabling it
+again. Existing mutable releases remain mutable unless republished. Disabling the policy
+does not unlock releases that are already immutable.
 
-GitHub locks release assets and the associated tag; release titles, notes and latest/prerelease
-metadata can still be edited. The repository currently has no older releases to migrate other
-than the mutable `nightly` exception.
+For this one-time setup:
 
-References: [GitHub immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
-and [enabling the policy](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes).
+1. Confirm that no publishing workflow is running, that the `update` name is unused, and
+   that a complete, verified immutable archive is available.
+2. Disable the repository policy using the documented repository API. Create a prerelease
+   named `update`, targeting the current default-branch SHA, with exactly that archive's
+   `update.json`. Set its title, notes, prerelease and latest metadata during this creation.
+3. Confirm that the published entry reports `immutable: false` and contains only the JSON.
+4. Restore and verify the repository policy in a `finally` block, including on failure.
+5. Verify that the archive remains immutable and that asset-only replacement of the JSON
+   preserves the fixed entry's ID, mutable state and tag target.
+
+Never edit, unpublish, delete, recreate or republish the fixed release record after setup.
+Never move its Git tag: it is a discovery address, not the source revision of the current APK.
+Normal CI uses only Contents permissions; policy administration is excluded from CI.
+The publisher rejects a missing, draft, locked or unexpected channel. It can repair a missing
+JSON or a failed-upload `starter` asset after an interrupted replacement, but never creates the release itself.
+
+References: [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases),
+[existing-release behavior](https://github.blog/changelog/2025-10-28-immutable-releases-are-now-generally-available/)
+and [repository policy API](https://docs.github.com/en/rest/repos/repos).
 
 ## Nightly archives and the update channel
 
 Each default-branch Nightly is archived under `nightly-yyyy-MM-dd-gitshortHash`, using the
 build-start UTC date and the first eight hexadecimal characters of the full commit SHA.
 The tag must resolve to that full commit. The APK, SDK AAR and schema-v1 `update.json` are
-uploaded to a draft, verified, and only then published as a prerelease. Published archives
-must be immutable and are never replaced; a rerun on the same date/commit reuses the existing complete archive.
-Only unpublished draft attempts may be discarded and rebuilt. GitHub may assign draft assets
-a temporary `untagged-*` URL; manifests always contain the final archive URL. The draft URL,
-asset identity, size and digest are checked before publication, and permanent URLs afterwards.
+uploaded to a draft, verified, and only then published as a prerelease. A rerun on the same
+date/commit reuses an existing complete immutable archive. Only unpublished drafts may be
+removed and rebuilt; public archives are never deleted or overwritten.
 
-The fixed `nightly` tag remains the compatibility and discovery channel:
+GitHub may rotate temporary `untagged-*` draft browser URLs when the draft is edited.
+Manifest URLs always use the final archive tag. Verification binds the release ID and
+asset IDs returned by the uploads, enumerates assets with pagination, then downloads all
+three through the asset-ID API to check their exact sizes and SHA-256 hashes. A missing
+server digest never bypasses byte verification. Permanent browser URLs are checked only
+after publication. The binary endpoint may stream or redirect; `gh api` handles transport.
 
-- Checks still read `releases/download/nightly/update.json`; no release-list API is needed.
-- The manifest's original `apk` object points to an APK under `nightly`, as existing clients
-  require. Its schema version and legacy `master` branch value remain unchanged.
-- An optional `archive` object identifies the immutable tag and the same APK bytes there.
-  New clients require the names, sizes and hashes to agree, select the immutable URL, and
-  independently verify against that tag's official manifest. Legacy clients ignore the addition.
-- The channel is advanced only after its public archive and both compatibility assets have
-  been verified. The manifest is replaced last. If this upload/verification fails, the previous
-  manifest is restored when one exists. GitHub asset replacement is not a transaction; a brief
-  missing-manifest response is possible and remains subject to the client's existing HTTP retries.
-- Only the literal `nightly` ref may move. Its ref is updated after the pointer is verified.
-  An older version/build time cannot move the channel backwards; interrupted ref updates can
-  be repaired by rerunning the workflow without replacing the archive or the current pointer.
-- Compatibility APK/AAR filenames include the immutable tag. Existing channel assets are
-  reused only after byte verification, never clobbered or automatically deleted, so older
-  downloads retain their URLs. The channel therefore also retains compatibility copies of
-  historical binaries; archive retention and channel retention must be considered separately.
+The fixed `update` release contains exactly one asset, `update.json`. Its bytes are copied
+unchanged from the verified public archive, so its APK and AAR URLs point directly to that
+archive. No compatibility binaries are uploaded to the fixed entry. New clients discover
+updates at `releases/download/update/update.json` and independently verify downloads against
+the selected archive's official manifest, even if the discovery channel has since advanced.
+The removed `nightly` endpoint is not restored: older app versions require one manual
+upgrade from the release list. Android version support is unchanged.
 
-The Telegram step uses the verified archived APK bytes. It sends a notification only when
-this run advances the update channel; a rerun of an already current channel does not resend it.
-The publishing helpers' offline fixtures run in CI as `test-nightly-release.py` and
-`test-nightly-channel.py`, including the workflow's actual manifest-building script.
+The channel advances only after the archive and both binaries have been verified. An older
+version/build time cannot roll it backwards. Replacing the JSON is the only channel write;
+the release ID, metadata and Git ref stay unchanged. Rerunning an already current channel
+performs no upload. The Telegram step uses the verified archived APK and sends only when
+the channel advances.
 
-API semantics: [GitHub releases](https://docs.github.com/en/rest/releases/releases) and
-[release assets](https://docs.github.com/en/rest/releases/assets). The already pinned
-[release action](https://github.com/softprops/action-gh-release) uploads the draft assets.
+`gh release upload --clobber` deletes the old asset before uploading its replacement. This
+is not a transaction: a brief missing-manifest response is possible. If upload or readback
+fails, the helper attempts to restore the previous JSON and reports failure. A failed
+restoration can require a rerun; when no previous JSON survives, rollback ordering history
+is unavailable. Clients retain their existing HTTP retries.
+
+Offline regression fixtures run in CI as `test-nightly-release.py` and
+`test-nightly-channel.py`. They include the workflow's manifest generator, rotating draft
+URLs, ID mismatches, corrupt downloads, JSON-only channel writes and idempotent reruns.
+
+API contracts: [releases](https://docs.github.com/en/rest/releases/releases),
+[release assets](https://docs.github.com/en/rest/releases/assets) and
+[CLI replacement semantics](https://cli.github.com/manual/gh_release_upload).

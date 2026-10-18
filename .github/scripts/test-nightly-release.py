@@ -120,15 +120,40 @@ class ReleaseTest(unittest.TestCase):
             self.assertEqual(draft, release.find_release(REPO, TAG))
         self.assertEqual(('api', '--paginate', '--slurp', f'repos/{REPO}/releases?per_page=100'), api.call_args.args)
 
-    def test_temporary_draft_urls_are_confined_to_the_official_repository(self):
-        prefix = f'https://github.com/{REPO}/releases/download/'
-        expected = prefix + TAG + '/build.apk'
-        self.assertEqual(expected, release.canonical_asset_url(REPO, TAG, 'build.apk', prefix + 'untagged-abc123/build.apk'))
-        self.assertEqual(expected, release.canonical_asset_url(REPO, TAG, 'build.apk', expected))
-        for url in [expected + '?other=1', expected + '#other', expected.replace('github.com', 'evil.example'),
-                    expected.replace(TAG, 'nightly'), expected.replace('build.apk', 'another.apk')]:
-            with self.subTest(url=url), self.assertRaises(ValueError):
-                release.canonical_asset_url(REPO, TAG, 'build.apk', url)
+    def test_draft_verification_binds_ids_and_bytes_while_browser_urls_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            paths = [directory / 'build.apk', directory / 'sdk.aar', directory / 'update.json']
+            manifest = {'schemaVersion': 1, 'channel': 'nightly', 'branch': 'master', 'releaseTag': TAG,
+                        'versionName': 'fixture', 'versionCode': 500, 'builtAtUtc': '2026-10-18T00:00:00Z', 'commit': {'sha': SHA}}
+            for key, path in zip(['apk', 'sdk'], paths):
+                path.write_bytes(key.encode())
+                manifest[key] = {'name': path.name, 'sizeBytes': path.stat().st_size,
+                                 'sha256': release.digest(path), 'downloadUrl': release.canonical_asset_url(REPO, TAG, path.name)}
+            paths[2].write_text(json.dumps(manifest))
+            state = complete(True)
+            state['id'] = 10
+            for asset, path, asset_id in zip(state['assets'], paths, [1, 2, 3]):
+                asset.update(id=asset_id, size=path.stat().st_size, digest='sha256:' + release.digest(path),
+                             browser_download_url=f'https://github.com/{REPO}/releases/download/untagged-after-edit/{path.name}')
+            def api(*args, **kwargs):
+                return [deepcopy(state['assets'])] if '--paginate' in args else deepcopy(state)
+            def binary(repo, asset_id, path):
+                path.write_bytes(paths[asset_id - 1].read_bytes())
+            with patch.object(release, 'verify_ref'), patch.object(release, 'gh', side_effect=api), \
+                    patch.object(release, 'download_asset', side_effect=binary):
+                release.verify_draft(REPO, SHA, TAG, 10, [1, 2, 3], paths[2], paths[0], paths[1])
+                with self.assertRaisesRegex(ValueError, 'IDs differ'):
+                    release.verify_draft(REPO, SHA, TAG, 10, [1, 2, 99], paths[2], paths[0], paths[1])
+                with patch.object(release, 'download_asset', side_effect=lambda repo, asset_id, path: path.write_bytes(b'bad')):
+                    with self.assertRaisesRegex(ValueError, 'differs from'):
+                        release.verify_draft(REPO, SHA, TAG, 10, [1, 2, 3], paths[2], paths[0], paths[1])
+
+    def test_permanent_urls_are_derived_without_using_a_draft_browser_url(self):
+        self.assertEqual(f'https://github.com/{REPO}/releases/download/{TAG}/build.apk',
+                         release.canonical_asset_url(REPO, TAG, 'build.apk'))
+        with self.assertRaises(ValueError):
+            release.canonical_asset_url(REPO, TAG, '../outside.apk')
 
     def test_only_404_is_treated_as_an_absent_release(self):
         with patch.object(release.subprocess, 'run', return_value=CompletedProcess([], 1, '', 'failed (HTTP 404)')):

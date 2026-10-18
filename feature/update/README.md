@@ -2,16 +2,16 @@
 
 更新发现和变更列表可使用用户选择的 GitHub 代理。Stable 发现入口为
 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest/download/update.json`；
-Nightly 固定入口为 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/nightly/update.json`。
-
-每个 Nightly 构建另有 `nightly-yyyy-MM-dd-gitshortHash` 不可变归档。固定清单保留旧版使用的
-`apk` 对象，并通过可选 `archive` 对象给出相同 APK 的归档地址。新版要求两份元数据的名称、
-大小和 SHA-256 一致，且标签日期和短哈希匹配 UTC 构建日期及完整提交，随后选择归档地址。
+Nightly 固定入口为 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/update/update.json`。
+固定 `update` Release 仅保存这一份清单，其内容与选中的不可变归档清单逐字节一致。
+Nightly 的 APK、SDK AAR 和归档清单各自存放在 `nightly-yyyy-MM-dd-gitshortHash` 标签下；
+清单下载地址直接指向归档，标签日期和短哈希必须匹配 UTC 构建日期及完整提交。
+旧版应用使用的 `nightly` 入口已删除，需要从归档手动安装新版；Android 版本支持范围不变。
 
 下载前，Nightly 必须直连所选 APK 所属标签的官方 `update.json`；Stable 独立获取官方
 Stable 通道清单，并要求 APK 属于清单声明的版本标签。解析器要求通道一致，下载器核对
-APK 的名称、官方 URL、大小及 SHA-256。复核请求不使用代理。旧版继续解析固定 Nightly
-清单原有的 `apk` 对象和地址；没有 `archive` 的旧 Nightly 清单仍受支持。
+APK 的名称、官方 URL、大小及 SHA-256。复核请求不使用代理，也不会在下载过程中改为
+信任已经滚动的 Nightly 入口。解析器保留旧清单格式的读取能力，发现入口不回退到已删除的标签。
 官方请求失败、清单格式无效或元数据不一致时，下载失败；不会仅凭代理提供的摘要继续。
 这仍依赖系统 TLS 信任、GitHub 及发布账户的安全，不提供对发布账户失陷的保证。
 官方地址无法直连时，应用内下载也无法完成，即使代理本身可达。
