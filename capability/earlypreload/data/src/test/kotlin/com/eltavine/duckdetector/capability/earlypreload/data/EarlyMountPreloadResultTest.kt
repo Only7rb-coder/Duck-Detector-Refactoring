@@ -47,11 +47,13 @@ class EarlyMountPreloadResultTest {
         ).normalize()
         val warning = EarlyMountPreloadResult(
             hasRun = true, mountIdGapDetected = true, minorDevGapDetected = true,
+            peerGroupGapDetected = true, futileHideDetected = true,
         ).normalize()
 
         assertTrue(danger.hasDangerSignal)
         assertTrue(danger.findings.any { it == "MNT_STRINGS|MntStrings|DANGER" })
         assertFalse(warning.hasDangerSignal)
-        assertTrue(warning.hasWarningSignal)
+        assertFalse(warning.hasWarningSignal)
+        assertTrue(warning.findings.all { it.endsWith("|INFO") })
     }
 }

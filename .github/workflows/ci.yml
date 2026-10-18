@@ -72,7 +72,12 @@ jobs:
           python3 capability/selinuxpolicy/data/src/test/python/test_status_abi_native.py
 
       - name: Test mount ID observation policy
-        run: python3 core/native/src/test/python/test_mount_id_observation.py
+        run: |
+          python3 core/native/src/test/python/test_mount_id_observation.py
+          for suite in feature/*/data/src/test/python; do
+            test -d "$suite" || continue
+            python3 -m unittest discover -s "$suite" -p 'test_*native.py'
+          done
 
       # Research tools pin the upstream inputs behind a detector's evidence record. Their
       # self-tests are offline; the network audit stays an explicit manual step.

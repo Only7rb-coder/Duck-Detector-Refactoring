@@ -100,10 +100,10 @@ public data class EarlyMountPreloadResult(
         get() = activeSignals.size
 
     val hasDangerSignal: Boolean
-        get() = futileHideDetected || mntStringsDetected
+        get() = mntStringsDetected
 
     val hasWarningSignal: Boolean
-        get() = minorDevGapDetected || peerGroupGapDetected
+        get() = false
 
     public fun messagesFor(signal: EarlyMountPreloadSignal): List<String> {
         return findings.mapNotNull { finding ->
@@ -132,7 +132,10 @@ public data class EarlyMountPreloadResult(
         val resolvedFindings = if (findings.isNotEmpty()) {
             findings.map { finding ->
                 val fields = finding.split('|')
-                if (fields.size == 3 && fields[0] == EarlyMountPreloadSignal.MOUNT_ID_GAP.key) {
+                if (fields.size == 3 && fields[0] in setOf(
+                    EarlyMountPreloadSignal.MOUNT_ID_GAP.key, EarlyMountPreloadSignal.FUTILE_HIDE.key,
+                    EarlyMountPreloadSignal.MINOR_DEV_GAP.key, EarlyMountPreloadSignal.PEER_GROUP_GAP.key,
+                )) {
                     "${fields[0]}|${fields[1]}|INFO"
                 } else {
                     finding
@@ -140,11 +143,7 @@ public data class EarlyMountPreloadResult(
             }.distinct()
         } else {
             resolvedSignals.map {
-                val severity = when (it) {
-                    EarlyMountPreloadSignal.MOUNT_ID_GAP -> "INFO"
-                    EarlyMountPreloadSignal.MINOR_DEV_GAP, EarlyMountPreloadSignal.PEER_GROUP_GAP -> "WARNING"
-                    else -> "DANGER"
-                }
+                val severity = if (it == EarlyMountPreloadSignal.MNT_STRINGS) "DANGER" else "INFO"
                 "${it.key}|${it.label}|$severity"
             }
         }

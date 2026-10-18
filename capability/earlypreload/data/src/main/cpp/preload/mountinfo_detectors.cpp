@@ -17,11 +17,13 @@
 
 #include "preload/early_detector.h"
 #include "common/mount_id_observation.h"
+#include "common/mountinfo_field.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <fstream>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -39,7 +41,7 @@ namespace duckdetector::preload {
             std::string root;
             std::string target;
             std::string vfsOptions;
-            int masterGroup = 0;
+            std::vector<int> peerGroups;
             std::string fsType;
             std::string source;
             std::string superOptions;
@@ -58,16 +60,22 @@ namespace duckdetector::preload {
             if (colonPos == std::string::npos) {
                 return false;
             }
-            entry.major = static_cast<unsigned int>(std::stoul(devStr.substr(0, colonPos)));
-            entry.minor = static_cast<unsigned int>(std::stoul(devStr.substr(colonPos + 1)));
+            if (entry.id <= 0 || entry.parentId < 0 ||
+                !common::parse_mountinfo_number(devStr.substr(0, colonPos), entry.major) ||
+                !common::parse_mountinfo_number(devStr.substr(colonPos + 1), entry.minor)) {
+                return false;
+            }
 
-            entry.masterGroup = 0;
+            entry.peerGroups.clear();
             std::string token;
             while (iss >> token && token != "-") {
                 if (token.starts_with("shared:") || token.starts_with("master:")) {
                     const std::size_t fieldColon = token.find(':');
                     if (fieldColon != std::string::npos) {
-                        entry.masterGroup = std::stoi(token.substr(fieldColon + 1));
+                        int group = 0;
+                        if (!common::parse_mountinfo_number(token.substr(fieldColon + 1), group) ||
+                            group <= 0) return false;
+                        entry.peerGroups.push_back(group);
                     }
                 }
             }
@@ -187,13 +195,13 @@ namespace duckdetector::preload {
             result.minorDevGapDetected = true;
             if (mount.minor != lastMinor + 1) {
                 result.findings.push_back(
-                        "MINOR_DEV_GAP|Expected minor " + std::to_string(lastMinor + 1) +
-                        ", got " + std::to_string(mount.minor) + " at " + mount.target + "|WARNING"
+                        "MINOR_DEV_GAP|Previous minor + 1=" + std::to_string(lastMinor + 1) +
+                        ", got " + std::to_string(mount.minor) + " at " + mount.target + "|INFO"
                 );
             } else {
                 result.findings.push_back(
-                        "MINOR_DEV_GAP|Unexpected tmpfs target before /sys: " + mount.target +
-                        " (minor " + std::to_string(mount.minor) + ")|WARNING"
+                        "MINOR_DEV_GAP|Tmpfs minor lies between /dev and /sys: " + mount.target +
+                        " (minor " + std::to_string(mount.minor) + ")|INFO"
                 );
             }
             return true;
@@ -204,29 +212,16 @@ namespace duckdetector::preload {
 
     bool detect_peer_group_gap(EarlyMountPreloadResult &result) {
         const auto mounts = parse_mountinfo();
-        std::vector<bool> peerGroups;
+        std::set<int> peerGroups;
         for (const auto &mount: mounts) {
-            if (mount.masterGroup > 0) {
-                if (peerGroups.size() < static_cast<std::size_t>(mount.masterGroup)) {
-                    peerGroups.resize(static_cast<std::size_t>(mount.masterGroup), false);
-                }
-                peerGroups[static_cast<std::size_t>(mount.masterGroup - 1)] = true;
-            }
+            peerGroups.insert(mount.peerGroups.begin(), mount.peerGroups.end());
         }
-
-        constexpr int kAllowedGaps = 3;
-        int gapCount = 0;
-        for (bool present: peerGroups) {
-            if (!present) {
-                ++gapCount;
-            }
-        }
-
-        if (gapCount > kAllowedGaps) {
+        const auto gapCount = peerGroups.empty() ? 0LL :
+                static_cast<long long>(*peerGroups.rbegin()) - static_cast<long long>(peerGroups.size());
+        if (gapCount > 0) {
             result.peerGroupGapDetected = true;
             result.findings.push_back(
-                    "PEER_GROUP_GAP|Found " + std::to_string(gapCount) + " gaps (allowed " +
-                    std::to_string(kAllowedGaps) + ")|WARNING"
+                    "PEER_GROUP_GAP|Unrepresented group IDs=" + std::to_string(gapCount) + ". Peer group IDs are global and need not be consecutive in this namespace.|INFO"
             );
             return true;
         }

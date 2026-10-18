@@ -28,3 +28,5 @@ The early preload capability captures mount and virtualization evidence in the t
 - Visibility limits: the preload matches finding labels produced by the virtualization native unit, a text protocol recorded in docs/architecture/follow-ups.md.
 - Result states: captured, stale, not run.
 - Interpretation: consumers compare the early and runtime views.
+
+Mount ID, peer group and anonymous-device identifiers are globally allocated and reusable; proc inode ctime reflects inode creation/state rather than a mount event. These startup observations normalize to INFO, including legacy records, and cannot contribute to danger or warning. Only the specific mntent root source/path marker currently contributes to `hasDangerSignal`; `/data/adb` path matches require a path-component boundary. The parser rejects malformed/overflowing numbers without throwing, and peer group counting stores observed identifiers rather than allocating a bitmap indexed by the largest global ID. See the linked Mount evidence record for the inspected ACK functions, platform counterexamples, and injected-I/O regressions.

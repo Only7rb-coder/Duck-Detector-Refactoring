@@ -41,7 +41,7 @@ import org.junit.Test
 class MountRepositoryTest {
 
     @Test
-    fun `preload only futile hide escalates mount to danger`() = runBlocking {
+    fun `preload proc inode timestamp is informational`() = runBlocking {
         val report = MountRepository(
             nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot()),
             preloadResultProvider = { preloadResult(futileHideDetected = true) },
@@ -50,11 +50,12 @@ class MountRepositoryTest {
         assertEquals(MountStage.READY, report.stage)
         assertTrue(report.earlyPreloadAvailable)
         assertTrue(report.earlyPreloadDetected)
-        assertTrue(report.dangerFindings.any { it.id == "early_preload_futile_hide" })
+        assertTrue(report.findings.any { it.id == "early_preload_futile_hide" && it.severity == MountFindingSeverity.INFO })
+        assertTrue(report.dangerFindings.isEmpty())
     }
 
     @Test
-    fun `preload only minor dev gap escalates mount to warning`() = runBlocking {
+    fun `preload minor device allocation is informational`() = runBlocking {
         val report = MountRepository(
             nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot()),
             preloadResultProvider = { preloadResult(minorDevGapDetected = true) },
@@ -62,7 +63,8 @@ class MountRepositoryTest {
 
         assertEquals(MountStage.READY, report.stage)
         assertTrue(report.earlyPreloadDetected)
-        assertTrue(report.warningFindings.any { it.id == "early_preload_minor_dev_gap" })
+        assertTrue(report.findings.any { it.id == "early_preload_minor_dev_gap" && it.severity == MountFindingSeverity.INFO })
+        assertTrue(report.warningFindings.isEmpty())
         assertTrue(report.dangerFindings.isEmpty())
     }
 
@@ -100,7 +102,7 @@ class MountRepositoryTest {
         }
 
     @Test
-    fun `warning level path and statx signals keep their rows at warning`() = runBlocking {
+    fun `busybox and VFS mount root attributes are informational`() = runBlocking {
         val report = MountRepository(
             nativeBridge = FakeMountNativeBridge(
                 snapshot = cleanSnapshot().copy(busyboxDetected = true, statxMountRootAttribute = true),
@@ -108,18 +110,18 @@ class MountRepositoryTest {
             preloadResultProvider = { EarlyMountPreloadResult.empty() },
         ).scan()
 
-        assertEquals(MountMethodOutcome.WARNING, report.methods.single { it.label == "Path probes" }.outcome)
-        assertEquals(MountMethodOutcome.WARNING, report.methods.single { it.label == "statx cross-check" }.outcome)
+        assertEquals(MountMethodOutcome.SUPPORT, report.methods.single { it.label == "Path probes" }.outcome)
+        assertEquals(MountMethodOutcome.SUPPORT, report.methods.single { it.label == "statx cross-check" }.outcome)
     }
 
     @Test
-    fun `statx mount id contradiction stays danger`() = runBlocking {
+    fun `unconfirmed statx capture difference is informational`() = runBlocking {
         val report = MountRepository(
             nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot().copy(statxMountRootAnomaly = true)),
             preloadResultProvider = { EarlyMountPreloadResult.empty() },
         ).scan()
 
-        assertEquals(MountMethodOutcome.DANGER, report.methods.single { it.label == "statx cross-check" }.outcome)
+        assertEquals(MountMethodOutcome.SUPPORT, report.methods.single { it.label == "statx cross-check" }.outcome)
     }
 
     @Test
@@ -223,12 +225,12 @@ class MountRepositoryTest {
     }
 
     @Test
-    fun `mount id observations do not dilute direct mount artifacts or statx contradictions`() = runBlocking {
-        for (label in listOf("Magisk mounts", "statx mount ID mismatch")) {
+    fun `mount id observations do not dilute direct root mount artifacts`() = runBlocking {
+        for (label in listOf("Magisk mounts", "KernelSU or magic-mount overlay")) {
             val report = MountRepository(
                 nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot().copy(
                     magiskMountDetected = label == "Magisk mounts",
-                    statxMntIdMismatch = label == "statx mount ID mismatch",
+                    ksuOverlayDetected = label == "KernelSU or magic-mount overlay",
                     findings = listOf(MountNativeFinding(
                         group = "CONSISTENCY", severity = "DANGER", label = label,
                         value = "Present", detail = "Independent evidence",

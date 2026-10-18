@@ -60,10 +60,10 @@ internal fun buildPreloadFindings(result: EarlyMountPreloadResult): List<MountFi
             add(
                 MountFinding(
                     id = "early_preload_futile_hide",
-                    label = "Futile hide",
+                    label = "Proc inode timestamps",
                     value = "ctime drift",
                     group = MountFindingGroup.CONSISTENCY,
-                    severity = MountFindingSeverity.DANGER,
+                    severity = MountFindingSeverity.INFO,
                     detail = preloadSignalDetail(
                         result = result,
                         signal = EarlyMountPreloadSignal.FUTILE_HIDE,
@@ -99,10 +99,10 @@ internal fun buildPreloadFindings(result: EarlyMountPreloadResult): List<MountFi
             add(
                 MountFinding(
                     id = "early_preload_minor_dev_gap",
-                    label = "Minor device gap",
+                    label = "Minor device observation",
                     value = "Sequence drift",
                     group = MountFindingGroup.CONSISTENCY,
-                    severity = MountFindingSeverity.WARNING,
+                    severity = MountFindingSeverity.INFO,
                     detail = preloadSignalDetail(
                         result = result,
                         signal = EarlyMountPreloadSignal.MINOR_DEV_GAP,
@@ -116,10 +116,10 @@ internal fun buildPreloadFindings(result: EarlyMountPreloadResult): List<MountFi
             add(
                 MountFinding(
                     id = "early_preload_peer_group_gap",
-                    label = "Peer group gap",
+                    label = "Peer group observation",
                     value = "Startup gap",
                     group = MountFindingGroup.CONSISTENCY,
-                    severity = MountFindingSeverity.WARNING,
+                    severity = MountFindingSeverity.INFO,
                     detail = preloadSignalDetail(
                         result = result,
                         signal = EarlyMountPreloadSignal.PEER_GROUP_GAP,
