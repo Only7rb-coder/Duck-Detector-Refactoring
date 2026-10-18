@@ -39,7 +39,7 @@ DuckDetector 在 Android 设备上采集并关联与安全相关的证据，用�
 
 # 快速上手
 
-1. **下载：** 从[最新 Stable 版本](https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest)下载 APK。Stable 版本使用 `v26.10.0` 这样的日历版本号；[Nightly 版本](https://github.com/eltavine/Duck-Detector-Refactoring/releases/tag/nightly)跟随 `main` 分支的每一次更改。两者都会同步推送到 [Telegram 频道](https://t.me/duck_detector)，应用检查哪个渠道的更新可在 **设置 → 关于 → 更新渠道** 中选择。
+1. **下载：** 从[最新 Stable 版本](https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest)下载 APK。Stable 版本使用 `v26.10.0` 这样的日历版本号；[Nightly 版本](https://github.com/eltavine/Duck-Detector-Refactoring/releases/tag/nightly)跟随 `main` 分支的每一次更改，每次构建独立归档为 `nightly-yyyy-MM-dd-gitshortHash`；固定 `nightly` 发布作为可变更新入口，兼容现有客户端。两者都会同步推送到 [Telegram 频道](https://t.me/duck_detector)，应用检查哪个渠道的更新可在 **设置 → 关于 → 更新渠道** 中选择。
 2. **安装：** 安装到 Android 10 及以上版本的设备，无需 Root 权限。
 3. **扫描：** 首次启动时需要同意用户协议，并完成几项启动选项：通知、Live Update、TEE 检查所用的在线吊销数据刷新，以及包可见性。之后扫描会自动开始，每个检测器完成后，对应卡片随即显示结果。
 4. **解读结果：** 参照下文说明。报告结果或寻求帮助时，请[提交 Issue](https://github.com/eltavine/Duck-Detector-Refactoring/issues)，并附上用仪表盘顶部 **Export Report** 保存的报告文件；只有摘要截图是不够的。

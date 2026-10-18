@@ -63,6 +63,8 @@ jobs:
           python3 .github/scripts/test-text-protocols.py
           python3 .github/scripts/test-android-toolchain-updates.py
           python3 .github/scripts/test-android-toolchain-publication.py
+          python3 .github/scripts/test-nightly-release.py
+          python3 .github/scripts/test-nightly-channel.py
           python3 scripts/test_new_detector.py
 
       - name: Test SELinux native parsing and experiment control flow

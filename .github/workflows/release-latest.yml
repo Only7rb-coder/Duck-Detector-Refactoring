@@ -101,6 +101,11 @@ jobs:
           fi
           git checkout --quiet --detach "refs/tags/${tag_name}"
 
+          if [ "${tag_name}" = "nightly" ]; then
+            echo "The nightly tag is reserved for the mutable update channel in build.yml." >&2
+            exit 1
+          fi
+
           if ! git check-ref-format "refs/heads/${DEFAULT_BRANCH}" >/dev/null; then
             echo "Repository default branch name is not a valid git ref: ${DEFAULT_BRANCH}" >&2
             exit 1
@@ -595,6 +600,18 @@ jobs:
             -F draft=false \
             -F prerelease=false \
             -f make_latest=true >/dev/null
+
+      - name: Verify release immutability
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release_target.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '.immutable')" != true ]; then
+            echo "Published releases must be immutable. Enable repository release immutability." >&2
+            exit 1
+          fi
 
       - name: Verify the latest-release links
         shell: bash

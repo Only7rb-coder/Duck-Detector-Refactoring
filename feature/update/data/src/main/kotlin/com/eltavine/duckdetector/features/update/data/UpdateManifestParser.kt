@@ -31,7 +31,7 @@ import org.json.JSONObject
 /**
  * Reads update.json as .github/scripts/release_manifest.py writes it. A Stable manifest must name
  * its release, and its APK must be an asset of that release; a Nightly APK must be an asset of the
- * Nightly release.
+ * selected Nightly archive or its legacy compatibility release.
  */
 class UpdateManifestParser {
 
@@ -57,15 +57,22 @@ class UpdateManifestParser {
             UpdateChannel.STABLE -> parseRelease(root.requireObject("release"), versionName)
             UpdateChannel.NIGHTLY -> null
         }
+        val commit = parseCommit(root.requireObject("commit"))
+        val builtAtUtc = root.requireIsoInstant("builtAtUtc")
+        val apk = parseApk(root.requireObject("apk"), releaseTag = release?.tag)
+        val selectedApk = if (expectedChannel == UpdateChannel.NIGHTLY) {
+            validateRelease(apk.downloadUrl, apk.name, commit.sha, builtAtUtc, root.optionalString("releaseTag"))
+            preferArchive(root, apk, commit.sha, builtAtUtc)
+        } else apk
         return UpdateManifest(
             schemaVersion = schemaVersion,
             channel = expectedChannel,
             branch = branch,
             versionName = versionName,
             versionCode = root.requirePositiveInt("versionCode"),
-            commit = parseCommit(root.requireObject("commit")),
-            builtAtUtc = root.requireIsoInstant("builtAtUtc"),
-            apk = parseApk(root.requireObject("apk"), releaseTag = release?.tag ?: UpdateEndpoints.NIGHTLY_TAG),
+            commit = commit,
+            builtAtUtc = builtAtUtc,
+            apk = selectedApk,
             release = release,
             changes = if (expectedChannel == UpdateChannel.NIGHTLY) parseOptionalChanges(root) else null,
         )
@@ -97,7 +104,7 @@ class UpdateManifestParser {
         return UpdateRelease(tag = tag, url = url, notes = json.optionalString("notes"))
     }
 
-    private fun parseApk(json: JSONObject, releaseTag: String): UpdateApk {
+    private fun parseApk(json: JSONObject, releaseTag: String?): UpdateApk {
         val name = json.requireNonBlankString("name")
         if (name.length > MAX_ASSET_NAME_LENGTH ||
             !name.endsWith(".apk", ignoreCase = true) ||
@@ -106,7 +113,13 @@ class UpdateManifestParser {
             throw UpdateManifestValidationException("Update asset name is invalid.")
         }
         val downloadUrl = json.requireNonBlankString("downloadUrl")
-        validateDownloadUrl(downloadUrl, name, releaseTag)
+        if (releaseTag == null) {
+            try {
+                NightlyReleasePaths.tagFor(downloadUrl, name)
+            } catch (failure: Exception) {
+                throw UpdateManifestValidationException(failure.message ?: "Invalid Nightly URL")
+            }
+        } else validateDownloadUrl(downloadUrl, name, releaseTag)
         val sha256 = json.requireNonBlankString("sha256").lowercase()
         if (!SHA256_REGEX.matches(sha256)) {
             throw UpdateManifestValidationException("APK SHA-256 is invalid.")
@@ -129,13 +142,43 @@ class UpdateManifestParser {
         if (uri.scheme != "https" ||
             !uri.host.equals(EXPECTED_DOWNLOAD_HOST, ignoreCase = true) ||
             uri.rawUserInfo != null ||
-            uri.port != -1
+            uri.port != -1 || uri.rawQuery != null || uri.rawFragment != null
         ) {
             throw UpdateManifestValidationException("APK download URL must use the official GitHub host.")
         }
         if (uri.path != "${UpdateEndpoints.REPOSITORY_PATH}/releases/download/$releaseTag/$apkName") {
             throw UpdateManifestValidationException("APK download URL is outside the $releaseTag release.")
         }
+    }
+
+    private fun validateRelease(url: String, name: String, sha: String, timestamp: String, declaredTag: String = ""): String {
+        try {
+            val tag = NightlyReleasePaths.tagFor(url, name)
+            NightlyReleasePaths.validateBuild(tag, sha, timestamp)
+            require(declaredTag.isEmpty() || declaredTag == tag) { "Release tag differs from APK URL" }
+            return tag
+        } catch (failure: Exception) {
+            throw UpdateManifestValidationException(failure.message ?: "Invalid Nightly release URL")
+        }
+    }
+
+    private fun preferArchive(root: JSONObject, alias: UpdateApk, sha: String, timestamp: String): UpdateApk {
+        if (!root.has("archive")) return alias
+        val archive = root.requireObject("archive")
+        val tag = archive.requireNonBlankString("tag")
+        if (!NightlyReleasePaths.isVersionedTag(tag)) {
+            throw UpdateManifestValidationException("Archive must use a per-build Nightly tag")
+        }
+        val apk = archive.requireObject("apk")
+        val name = apk.requireNonBlankString("name")
+        val url = apk.requireNonBlankString("downloadUrl")
+        validateRelease(url, name, sha, timestamp, tag)
+        if (name != alias.name || apk.requirePositiveLong("sizeBytes") != alias.sizeBytes ||
+            apk.requireNonBlankString("sha256").lowercase() != alias.sha256
+        ) {
+            throw UpdateManifestValidationException("Archived APK metadata differs from the channel APK")
+        }
+        return alias.copy(downloadUrl = url)
     }
 
     // The changes only list what an update adds. A list that fails validation is dropped rather than

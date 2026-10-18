@@ -171,7 +171,15 @@ def validate_manifest(manifest: dict, repository: str) -> None:
         _require(isinstance(release.get("notes"), str), "release.notes")
         _require("changes" not in manifest, "a stable manifest carries release notes, not changes")
     else:
-        tag = NIGHTLY_TAG
+        tag = manifest.get("releaseTag", NIGHTLY_TAG)
+        if tag != NIGHTLY_TAG:
+            from nightly_release import validate_tag
+            try:
+                validate_tag(tag, commit["sha"])
+                build_date = datetime.fromisoformat(manifest["builtAtUtc"].replace("Z", "+00:00")).astimezone(timezone.utc)
+                _require(tag[8:18] == build_date.strftime("%Y-%m-%d"), "Nightly tag and build date differ")
+            except (ValueError, TypeError) as error:
+                raise ManifestError("Nightly tag does not identify this build") from error
         _require(release is None, "a Nightly manifest names no release")
         if "changes" in manifest:
             _validate_changes(manifest["changes"])

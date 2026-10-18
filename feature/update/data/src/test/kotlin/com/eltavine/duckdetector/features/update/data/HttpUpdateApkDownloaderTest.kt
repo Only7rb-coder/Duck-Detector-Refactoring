@@ -114,8 +114,8 @@ class HttpUpdateApkDownloaderTest {
     fun `untrusted digest and unavailable official metadata fail before the apk request`() = runTest {
         val apk = apk(size = payload.size.toLong(), sha256 = sha256(payload))
         val forged = apk.copy(sha256 = "f".repeat(64))
-        assertEquals(UpdateDownloadResult.Failed, downloader(forged, trustedApk = { apk }).download(forged, url(), UpdateChannel.NIGHTLY) {})
-        assertEquals(UpdateDownloadResult.Failed, downloader(apk, trustedApk = { throw IOException("offline") }).download(apk, url(), UpdateChannel.NIGHTLY) {})
+        assertEquals(UpdateDownloadResult.Failed, downloader(forged, trustedApk = { _, _ -> apk }).download(forged, url(), UpdateChannel.NIGHTLY) {})
+        assertEquals(UpdateDownloadResult.Failed, downloader(apk, trustedApk = { _, _ -> throw IOException("offline") }).download(apk, url(), UpdateChannel.NIGHTLY) {})
         assertEquals(0, apkRequests.get())
         assertTrue(downloadDirectory.listFiles().orEmpty().isEmpty())
     }
@@ -124,7 +124,7 @@ class HttpUpdateApkDownloaderTest {
     fun `manifest sizes above the fixed cap never fetch metadata or create files`() = runTest {
         val apk = apk(size = MAX_UPDATE_APK_BYTES + 1, sha256 = sha256(payload))
         var metadataFetched = false
-        val downloader = downloader(apk, trustedApk = { metadataFetched = true; apk })
+        val downloader = downloader(apk, trustedApk = { _, _ -> metadataFetched = true; apk })
         assertEquals(UpdateDownloadResult.Failed, downloader.download(apk, url(), UpdateChannel.NIGHTLY) {})
         assertTrue(!metadataFetched)
         assertTrue(downloadDirectory.listFiles().orEmpty().isEmpty())
@@ -220,7 +220,7 @@ class HttpUpdateApkDownloaderTest {
     fun `stable downloads independently verify the stable metadata`() = runTest {
         val apk = apk(payload.size.toLong(), sha256(payload))
         var requestedChannel: UpdateChannel? = null
-        val result = downloader(apk, trustedApk = { channel -> requestedChannel = channel; apk })
+        val result = downloader(apk, trustedApk = { _, channel -> requestedChannel = channel; apk })
             .download(apk, url(), UpdateChannel.STABLE) {}
         assertTrue(result is UpdateDownloadResult.Ready)
         assertEquals(UpdateChannel.STABLE, requestedChannel)
@@ -230,7 +230,7 @@ class HttpUpdateApkDownloaderTest {
 
     private fun downloader(
         apk: UpdateApk,
-        trustedApk: (UpdateChannel) -> UpdateApk = { apk },
+        trustedApk: (UpdateApk, UpdateChannel) -> UpdateApk = { _, _ -> apk },
         nanoTime: () -> Long = System::nanoTime,
     ) = HttpUpdateApkDownloader(
         downloadDirectory,

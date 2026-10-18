@@ -1,10 +1,17 @@
 # Stable / Nightly 更新的下载与安装边界
 
-更新发现和变更列表可使用用户选择的 GitHub 代理。下载前，下载器必须通过
-所选通道的官方地址独立获取清单：Stable 使用
-`https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest/download/update.json`，
-Nightly 使用 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/nightly/update.json`。
-解析器要求通道一致，Stable APK 必须属于清单中的版本标签；下载器核对 APK 的名称、官方 URL、大小及 SHA-256。该请求不使用代理路由。
+更新发现和变更列表可使用用户选择的 GitHub 代理。Stable 发现入口为
+`https://github.com/eltavine/Duck-Detector-Refactoring/releases/latest/download/update.json`；
+Nightly 固定入口为 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/download/nightly/update.json`。
+
+每个 Nightly 构建另有 `nightly-yyyy-MM-dd-gitshortHash` 不可变归档。固定清单保留旧版使用的
+`apk` 对象，并通过可选 `archive` 对象给出相同 APK 的归档地址。新版要求两份元数据的名称、
+大小和 SHA-256 一致，且标签日期和短哈希匹配 UTC 构建日期及完整提交，随后选择归档地址。
+
+下载前，Nightly 必须直连所选 APK 所属标签的官方 `update.json`；Stable 独立获取官方
+Stable 通道清单，并要求 APK 属于清单声明的版本标签。解析器要求通道一致，下载器核对
+APK 的名称、官方 URL、大小及 SHA-256。复核请求不使用代理。旧版继续解析固定 Nightly
+清单原有的 `apk` 对象和地址；没有 `archive` 的旧 Nightly 清单仍受支持。
 官方请求失败、清单格式无效或元数据不一致时，下载失败；不会仅凭代理提供的摘要继续。
 这仍依赖系统 TLS 信任、GitHub 及发布账户的安全，不提供对发布账户失陷的保证。
 官方地址无法直连时，应用内下载也无法完成，即使代理本身可达。
@@ -39,7 +46,7 @@ Nightly 使用 `https://github.com/eltavine/Duck-Detector-Refactoring/releases/d
 ```
 
 下载测试使用本地 HTTP 服务模拟响应，注入连接适配函数；生产入口仍要求 HTTPS。
-测试覆盖摘要与长度不匹配、官方元数据不一致或不可用、固定大小上限、分块响应超量、
+测试覆盖固定入口与归档元数据一致性、旧清单兼容、标签日期/提交验证、归档独立复核、摘要与长度不匹配、官方元数据不一致或不可用、固定大小上限、分块响应超量、
 HTTPS 重定向与降级拒绝、进度节流、取消清理及重命名失败。
 状态测试覆盖通道切换后的迟到进度/下载结果、Stable 清单独立复核、缓存失效后的重试、授权设置后保留下载、迟到回调、乱序清单检查、
 关闭对话框、重复点击及下载异常恢复。系统设置与安装器交互仍需要设备验证。
