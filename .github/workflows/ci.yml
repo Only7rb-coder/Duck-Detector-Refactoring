@@ -71,12 +71,16 @@ jobs:
           python3 capability/selinuxpolicy/data/src/test/python/test_avc_lookup_native.py
           python3 capability/selinuxpolicy/data/src/test/python/test_status_abi_native.py
 
-      - name: Test mount ID observation policy
+      - name: Test native observation policies and feature probes
+        shell: bash
         run: |
+          set -euo pipefail
+
           python3 core/native/src/test/python/test_mount_id_observation.py
           for suite in feature/*/data/src/test/python; do
-            test -d "$suite" || continue
-            python3 -m unittest discover -s "$suite" -p 'test_*native.py'
+            # Device-driven scripts need their own runner; discover only host suites here.
+            compgen -G "${suite}/test_*_host_native.py" > /dev/null || continue
+            python3 -m unittest discover -s "$suite" -p 'test_*_host_native.py'
           done
 
       # Research tools pin the upstream inputs behind a detector's evidence record. Their

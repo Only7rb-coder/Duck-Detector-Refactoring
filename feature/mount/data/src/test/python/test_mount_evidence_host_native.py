@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Execute the real mount-table and collection code with injected platform I/O."""
+"""Execute mount-table and collection code on the host with injected platform I/O."""
 import os
 from pathlib import Path
 import shutil
