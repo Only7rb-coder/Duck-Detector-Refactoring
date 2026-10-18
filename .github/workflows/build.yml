@@ -545,9 +545,8 @@ jobs:
           import os
           import sys
           from pathlib import Path
-          from urllib.parse import unquote, urlsplit
-
           sys.path.insert(0, ".github/scripts")
+          from nightly_release import canonical_asset_url
           import release_manifest
 
           apk_path = Path(os.environ["APK_PATH"])
@@ -591,12 +590,8 @@ jobs:
           if not isinstance(apk_url, str):
               raise SystemExit("Release action did not return an APK download URL.")
 
-          expected_prefix = (
-              f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['NIGHTLY_TAG']}/"
-          )
-          url_name = unquote(Path(urlsplit(apk_url).path).name)
-          if not apk_url.startswith(expected_prefix) or url_name != apk_name:
-              raise SystemExit(f"Unexpected Nightly APK URL: {apk_url}")
+          apk_draft_url = apk_url
+          apk_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], apk_name, apk_url)
 
           aar_asset_id = aar_asset.get("id")
           aar_name = aar_asset.get("name", "")
@@ -607,9 +602,8 @@ jobs:
               raise SystemExit(f"SDK AAR release asset is not uploaded: {aar_asset.get('state')!r}")
           if not isinstance(aar_name, str) or not aar_name.lower().endswith(".aar"):
               raise SystemExit(f"Release action returned an invalid SDK AAR asset name: {aar_name!r}")
-          if not isinstance(aar_url, str) or not aar_url.startswith(expected_prefix) or \
-                  unquote(Path(urlsplit(aar_url).path).name) != aar_name:
-              raise SystemExit(f"Unexpected Nightly SDK AAR URL: {aar_url}")
+          aar_draft_url = aar_url
+          aar_url = canonical_asset_url(os.environ["GITHUB_REPOSITORY"], os.environ["NIGHTLY_TAG"], aar_name, aar_url)
           aar_size = aar_path.stat().st_size
           if aar_asset.get("size") != aar_size:
               raise SystemExit(
@@ -668,6 +662,8 @@ jobs:
               output.write(f"apk_asset_id={apk_asset_id}\n")
               output.write(f"aar_asset_id={aar_asset_id}\n")
               output.write(f"aar_public_url={aar_url}\n")
+              output.write(f"apk_draft_url={apk_draft_url}\n")
+              output.write(f"aar_draft_url={aar_draft_url}\n")
           PY
 
           jq -e '
@@ -717,8 +713,8 @@ jobs:
           APK_ASSET_ID: ${{ steps.update_manifest.outputs.apk_asset_id }}
           APK_NAME: ${{ steps.update_manifest.outputs.apk_name }}
           APK_RELEASE_ID: ${{ steps.nightly_release.outputs.id }}
-          EXPECTED_AAR_URL: ${{ steps.update_manifest.outputs.aar_public_url }}
-          EXPECTED_APK_URL: ${{ steps.update_manifest.outputs.apk_public_url }}
+          EXPECTED_AAR_URL: ${{ steps.update_manifest.outputs.aar_draft_url }}
+          EXPECTED_APK_URL: ${{ steps.update_manifest.outputs.apk_draft_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MANIFEST_ASSETS_JSON: ${{ steps.nightly_manifest_release.outputs.assets }}
           MANIFEST_RELEASE_ID: ${{ steps.nightly_manifest_release.outputs.id }}

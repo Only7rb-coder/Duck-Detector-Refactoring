@@ -111,7 +111,9 @@ build-start UTC date and the first eight hexadecimal characters of the full comm
 The tag must resolve to that full commit. The APK, SDK AAR and schema-v1 `update.json` are
 uploaded to a draft, verified, and only then published as a prerelease. Published archives
 must be immutable and are never replaced; a rerun on the same date/commit reuses the existing complete archive.
-Only unpublished draft attempts may be discarded and rebuilt.
+Only unpublished draft attempts may be discarded and rebuilt. GitHub may assign draft assets
+a temporary `untagged-*` URL; manifests always contain the final archive URL. The draft URL,
+asset identity, size and digest are checked before publication, and permanent URLs afterwards.
 
 The fixed `nightly` tag remains the compatibility and discovery channel:
 

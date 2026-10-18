@@ -23,7 +23,7 @@ REPO = 'example/repository'
 
 def complete(draft):
     return {'tag_name': TAG, 'draft': draft, 'immutable': not draft, 'prerelease': True, 'assets': [
-        {'name': name, 'state': 'uploaded', 'size': 1} for name in ['build.apk', 'sdk.aar', 'update.json']]}
+        {'name': name, 'state': 'uploaded', 'size': 1, 'browser_download_url': f'https://github.com/{REPO}/releases/download/{TAG}/{name}'} for name in ['build.apk', 'sdk.aar', 'update.json']]}
 
 
 class ReleaseTest(unittest.TestCase):
@@ -120,6 +120,16 @@ class ReleaseTest(unittest.TestCase):
             self.assertEqual(draft, release.find_release(REPO, TAG))
         self.assertEqual(('api', '--paginate', '--slurp', f'repos/{REPO}/releases?per_page=100'), api.call_args.args)
 
+    def test_temporary_draft_urls_are_confined_to_the_official_repository(self):
+        prefix = f'https://github.com/{REPO}/releases/download/'
+        expected = prefix + TAG + '/build.apk'
+        self.assertEqual(expected, release.canonical_asset_url(REPO, TAG, 'build.apk', prefix + 'untagged-abc123/build.apk'))
+        self.assertEqual(expected, release.canonical_asset_url(REPO, TAG, 'build.apk', expected))
+        for url in [expected + '?other=1', expected + '#other', expected.replace('github.com', 'evil.example'),
+                    expected.replace(TAG, 'nightly'), expected.replace('build.apk', 'another.apk')]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                release.canonical_asset_url(REPO, TAG, 'build.apk', url)
+
     def test_only_404_is_treated_as_an_absent_release(self):
         with patch.object(release.subprocess, 'run', return_value=CompletedProcess([], 1, '', 'failed (HTTP 404)')):
             self.assertIsNone(release.gh('api', 'missing', missing_ok=True))
@@ -149,7 +159,7 @@ class ReleaseTest(unittest.TestCase):
                 paths.append(path)
                 assets.append({'id': number, 'name': name, 'state': 'uploaded', 'size': path.stat().st_size,
                                'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest(),
-                               'browser_download_url': f'https://github.com/{REPO}/releases/download/{tag}/{name}'})
+                               'browser_download_url': f'https://github.com/{REPO}/releases/download/untagged-2a1517dcdbf3c6e04686/{name}'})
             env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent), APK_PATH=str(paths[0]), AAR_PATH=str(paths[1]), GITHUB_REPOSITORY=REPO,
                        GITHUB_OUTPUT=str(directory / 'outputs'), NIGHTLY_TAG=tag, RELEASE_ASSETS_JSON=json.dumps(assets),
                        VERSION_NAME='2026.10.18-test', VERSION_CODE='500', NIGHTLY_MANIFEST_BRANCH='master',
@@ -159,8 +169,8 @@ class ReleaseTest(unittest.TestCase):
             manifest = json.loads((directory / 'update.json').read_text())
             self.assertEqual(tag, manifest['releaseTag'])
             self.assertEqual(sha, manifest['commit']['sha'])
-            self.assertEqual(assets[0]['browser_download_url'], manifest['apk']['downloadUrl'])
-            self.assertEqual(assets[1]['browser_download_url'], manifest['sdk']['downloadUrl'])
+            self.assertEqual(f'https://github.com/{REPO}/releases/download/{tag}/build.apk', manifest['apk']['downloadUrl'])
+            self.assertEqual(f'https://github.com/{REPO}/releases/download/{tag}/sdk.aar', manifest['sdk']['downloadUrl'])
             self.assertEqual(assets[1]['digest'][7:], manifest['sdk']['sha256'])
 
 

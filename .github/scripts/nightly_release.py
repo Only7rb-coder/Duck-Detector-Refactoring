@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlsplit
 
 
 def gh(*args, missing_ok=False):
@@ -44,6 +45,28 @@ def require_channel(repo):
 def require_immutable(release):
     if release.get('draft') is not False or release.get('immutable') is not True:
         raise ValueError('The published archive must be immutable; enable repository release immutability')
+
+
+def canonical_asset_url(repo, tag, name, draft_url):
+    """Draft assets may use GitHub's temporary untagged URL until publication."""
+    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9._+-]+', name):
+        raise ValueError('Unsafe archive asset name')
+    url = urlsplit(draft_url)
+    prefix = f'/{repo}/releases/download/'
+    remainder = url.path.removeprefix(prefix)
+    source_tag, separator, source_name = remainder.partition('/')
+    if (url.scheme != 'https' or url.netloc != 'github.com' or url.query or url.fragment
+            or not url.path.startswith(prefix) or separator != '/' or source_name != name
+            or (source_tag != tag and not re.fullmatch(r'untagged-[0-9a-z]+', source_tag))):
+        raise ValueError('Draft asset URL is outside the expected GitHub release')
+    return f'https://github.com/{repo}/releases/download/{tag}/{name}'
+
+
+def require_public_urls(release, repo, tag):
+    for asset in release.get('assets', []):
+        expected = f'https://github.com/{repo}/releases/download/{tag}/{asset["name"]}'
+        if asset.get('browser_download_url') != expected:
+            raise ValueError('Published archive asset URL does not match its permanent tag')
 
 
 def nightly_tag(timestamp, sha):
@@ -100,6 +123,7 @@ def prepare(repo, sha, timestamp):
         if release.get('draft') is False:
             require_complete(release, tag)
             require_immutable(release)
+            require_public_urls(release, repo, tag)
             return tag, False
         if release.get('draft') is not True:
             raise ValueError('Release did not report its draft state')
@@ -121,6 +145,7 @@ def publish(repo, sha, tag):
     published = gh('api', f'repos/{repo}/releases/tags/{tag}')
     require_complete(published, tag)
     require_immutable(published)
+    require_public_urls(published, repo, tag)
     verify_ref(repo, tag, sha)
 
 
