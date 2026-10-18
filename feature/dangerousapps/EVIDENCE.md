@@ -4,7 +4,7 @@ Status: reviewed
 
 HMA behavior checks, including the seccomp getpriority probe, have the coverage and limitations described below.
 
-The Dangerous Apps detector asks whether root managers, hooking frameworks and similar tools are installed, including when package visibility filtering or hiding modules keep them out of PackageManager.
+The Dangerous Apps detector asks whether root managers, hooking frameworks and similar tools are installed, including when package visibility filtering or hiding modules keep them out of PackageManager. It separately reports monitored package names present in this boot's package change history, without treating that history as current installation evidence.
 
 ## Signals
 
@@ -18,6 +18,83 @@ The Dangerous Apps detector asks whether root managers, hooking frameworks and s
 - Visibility limits: restricted visibility is reported; hidden-from-PackageManager findings are only computed under full visibility.
 - Result states: detected, hidden from PackageManager, restricted, clean.
 - Interpretation: an installed target is a finding at its category's severity; hiding from PackageManager is stronger.
+
+### Package changes since boot
+
+- Observable signal: exact monitored package names returned by `PackageManager.getChangedPackages(0)`,
+  with the returned sequence number when present. Only catalog matches are retained; unrelated
+  names in the platform response are discarded.
+- Producing subsystem: the current Android user's PackageManager change tracker and its
+  package-visibility filtering, reached through the public `ApplicationPackageManager` wrapper.
+- Mechanism: PackageManager records package additions, updates and removals. Every scan queries
+  from sequence zero, without persisting a cursor or results across scans or reboots. The tracker
+  coalesces repeated changes for a package; this is not an ordered event log. The API exposes no
+  event kind, event timestamp, signing certificate or proof of current installation.
+- References: Android [getChangedPackages](https://developer.android.com/reference/android/content/pm/PackageManager#getChangedPackages(int))
+  and [ChangedPackages](https://developer.android.com/reference/android/content/pm/ChangedPackages);
+  AOSP Android 12 [PackageManagerService.getChangedPackages](https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java),
+  Android 14 [PackageManagerService](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java),
+  Android 16 [PackageManagerService](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java),
+  [ComputerEngine.shouldFilterApplication](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/pm/ComputerEngine.java),
+  [ChangedPackagesTracker](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/pm/ChangedPackagesTracker.java)
+  and [ApplicationPackageManager](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/android/app/ApplicationPackageManager.java).
+- Applicability: public API since API 26, below this project's minimum API 29, on every supported
+  ABI. Records and sequence numbers reset on boot. The query uses the caller's user and grants no
+  cross-user access. No native code, hidden APIs, added permissions or global hooks are required.
+- Visibility limits: the checked Android 12–16 release implementations filter against current
+  package state. In Android 16, an ordinary non-instant, non-SDK-sandbox caller can retain a change
+  whose package state is null, because this path passes `filterUninstall=false`. Thus a completely
+  removed package can remain visible after installation-time filtering hid it. Removal from only
+  one user, retained package data, OEM changes and hiding-module versions need not behave alike.
+  This behavior is explanatory, not a required detection invariant. A null or empty response means
+  no visible target changes, never that a package was never installed; hiding can also filter the API.
+- Result states: not collected, available with or without catalog matches, permission denied,
+  query unavailable, invalid response. A non-null response must advance beyond sequence zero and
+  contain no null or blank package names. Empty filtered responses retain a valid returned sequence.
+  Cancellation propagates instead of becoming a negative finding.
+- Interpretation: matches are informational history evidence with current installation, running
+  state and concealment unconfirmed. Normal uninstallation produces the same evidence. History
+  has its own card section and export block; it never changes installed hits, hidden counts,
+  HMA corroboration inputs or current-package detection methods. An incomplete query prevents an
+  otherwise all-clear result. Stronger existing findings keep their original severity.
+
+Detection-vector credit: [FldBudin](https://github.com/FldBudin) and
+[aviraxp](https://github.com/aviraxp). The attribution concerns this vector, without assigning
+priority over independent discoveries or importing third-party implementation code.
+
+Verification includes eight JVM probe regressions and seven presentation/status/export regressions:
+exact catalog matching and deduplication; filtered empty and null responses; sequence reset between
+scans; permission, service and malformed-response failures; cancellation; independent history versus
+installed/hidden counts and severity; and retention of inventory/behavior limitations.
+
+The owning data module's `PackageChangeHistoryRuntimeTest` exercises the real public API twice per
+invocation. Android 16 / API 36 arm64 emulator observations use fingerprint
+`google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.F3/13894323:userdebug/dev-keys`, security patch
+`2025-07-05`. A code-free APK fixture uses the monitored name `com.tsng.hidemyapplist`; it contains
+no HMA implementation. The test host declares neither `QUERY_ALL_PACKAGES` nor a query for the
+fixture. Before installation the target was absent from both queries. After installation it remained
+invisible to both package-info and change-history queries. Complete normal removal made its change
+record visible while package-info still could not resolve it. Both queries in each invocation agreed.
+After reboot, both queries returned no target match and no sequence number, so the removed fixture's
+previous-boot evidence was not retained. All four lifecycle stages passed their runtime assertions.
+This validates stock package-visibility/removal behavior, without establishing the behavior of any
+HMA release, retained-data removal, multi-user removal, OEM firmware or physical device.
+
+To repeat the fixture lifecycle test, build `:feature:dangerousapps:data:assembleDebugAndroidTest`,
+install its APK, and install/remove a disposable APK with that monitored package name. Invoke:
+
+```sh
+adb shell am instrument -w -r \
+  -e class com.eltavine.duckdetector.features.dangerousapps.data.probes.PackageChangeHistoryRuntimeTest \
+  -e historyPackage com.tsng.hidemyapplist \
+  -e expectHistoryMatch true -e expectPackageVisible false \
+  com.eltavine.duckdetector.features.dangerousapps.data.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Use `expectHistoryMatch false` before installation and while the fixture is installed under restricted
+visibility. After complete removal, use `true`; after reboot use `false`. These expectations describe
+the tested stock API 36 host, not a requirement for all supported systems. A host that explicitly
+queries the target or has broad visibility can also observe its installation-time change.
 
 ### Filesystem and provider methods
 
