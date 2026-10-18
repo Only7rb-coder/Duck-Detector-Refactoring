@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -71,13 +72,16 @@ class MountEvidenceNativeTest(unittest.TestCase):
         self.assertIsNotNone(compiler)
         with tempfile.TemporaryDirectory(prefix="mount-evidence-test-") as directory:
             temporary = Path(directory)
-            for name, content in {
+            headers = {
                 "mount/detector_internal.h": INTERNAL,
-                "linux/stat.h": STATX,
                 "linux/magic.h": "#pragma once\n#define OVERLAYFS_SUPER_MAGIC 0x794c7630\n#define TMPFS_MAGIC 0x01021994\n",
                 "sys/statfs.h": "#pragma once\nextern long testFsType;\nstruct statfs { long f_type; };\ninline int statfs(const char *, struct statfs *value) { value->f_type = testFsType; return 0; }\n",
                 "android/log.h": "#pragma once\n",
-            }.items():
+            }
+            # glibc also imports linux/stat.h; preserve its native statx definition.
+            if sys.platform != "linux":
+                headers["linux/stat.h"] = STATX
+            for name, content in headers.items():
                 path = temporary / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
