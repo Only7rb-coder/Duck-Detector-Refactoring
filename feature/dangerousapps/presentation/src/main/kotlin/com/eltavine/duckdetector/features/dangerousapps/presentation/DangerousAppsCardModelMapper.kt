@@ -24,6 +24,7 @@ import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousAppsRepo
 import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousAppsStage
 import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousPackageVisibility
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckState
+import com.eltavine.duckdetector.features.dangerousapps.domain.PackageChangeHistoryState
 import com.eltavine.duckdetector.features.dangerousapps.domain.toDetectorStatus
 import com.eltavine.duckdetector.features.dangerousapps.presentation.model.DangerousAppsCardModel
 import com.eltavine.duckdetector.features.dangerousapps.presentation.model.DangerousAppsContextItemModel
@@ -56,6 +57,8 @@ class DangerousAppsCardModelMapper {
                     category = target.category.displayName,
                 )
             },
+            packageHistory = report.packageChangeHistory.takeIf { report.stage == DangerousAppsStage.READY }
+                ?.toCardModel(),
         )
     }
 
@@ -92,6 +95,8 @@ class DangerousAppsCardModelMapper {
                 report.packageVisibility == DangerousPackageVisibility.RESTRICTED -> "Inventory visibility limited"
                 report.packageVisibility == DangerousPackageVisibility.UNKNOWN -> "Package inventory unavailable"
                 report.behaviorChecks.any { it.state != HmaCheckState.CONSISTENT } -> "Behavior checks incomplete"
+                report.packageChangeHistory.state != PackageChangeHistoryState.AVAILABLE -> "Package change history incomplete"
+                report.packageChangeHistory.matchedTargets.isNotEmpty() -> "Package change history observed"
                 else -> "No known risky packages"
             }
         }
@@ -146,6 +151,12 @@ class DangerousAppsCardModelMapper {
 
                 report.behaviorChecks.any { it.state != HmaCheckState.CONSISTENT } ->
                     "No behavior mismatch was established, but some checks were partial, unavailable or inconclusive. Review each check's scope and controls."
+
+                report.packageChangeHistory.state != PackageChangeHistoryState.AVAILABLE ->
+                    "The package change history query did not complete successfully. Its missing evidence cannot establish that monitored packages have not appeared."
+
+                report.packageChangeHistory.matchedTargets.isNotEmpty() ->
+                    "This boot's package change history includes ${report.packageChangeHistory.matchedTargets.size} monitored package(s). Current installation and running state are unconfirmed; normal removal can leave the same evidence."
 
                 else ->
                     "PackageManager, createPackageContext + ZipFile, open APK descriptors, storage, loopback, IPC, accessibility, and native package-path probes did not surface known high-risk tools."
