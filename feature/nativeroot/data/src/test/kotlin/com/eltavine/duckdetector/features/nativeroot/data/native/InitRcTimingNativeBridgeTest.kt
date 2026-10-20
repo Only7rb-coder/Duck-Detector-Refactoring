@@ -69,6 +69,12 @@ class InitRcTimingNativeBridgeTest {
         )) assertThrows(IllegalArgumentException::class.java) { bridge.parse(corrupt) }
     }
 
+    @Test
+    fun `payload cannot claim completion with a full second of retained batches`() {
+        val invalid = payload().replace("128000\t133120\t138240\t149760", "7812500\t7812500\t7812500\t7812500")
+        assertThrows(IllegalArgumentException::class.java) { bridge.parse(invalid) }
+    }
+
     private fun payload(stage: Int = 0, count: Int = 32, cpu: Int = 2, cleaned: Int = 1, error: Int = 0) =
         "VERSION=1\nSTAGE=$stage\nERROR=$error\nCLEANUP_ERROR=0\nCLEANUP=$cleaned\nCPU=$cpu\n" +
             "ITERATIONS=128\nCOUNT=$count\n" + "ROUND=128000\t133120\t138240\t149760\n".repeat(count)

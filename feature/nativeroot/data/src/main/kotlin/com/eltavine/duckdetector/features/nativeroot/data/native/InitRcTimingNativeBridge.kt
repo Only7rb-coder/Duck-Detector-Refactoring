@@ -65,10 +65,11 @@ class InitRcTimingNativeBridge(
         val cleanupError = requireNotNull(fields["CLEANUP_ERROR"]).toInt().also { require(it >= 0) }
         val cleaned = fields["CLEANUP"] == "1"
         require(!cleaned || cleanupError == 0)
+        val observation = InitRcTimingObservation(stage, rounds, 128, cpu, error, cleanupError, cleaned)
         if (stage == InitRcTimingCollection.COLLECTED) {
-            require(rounds.size == 32 && cpu >= 0 && error == 0 && cleaned && cleanupError == 0)
+            require(observation.hasCompleteSample && error == 0 && cleaned && cleanupError == 0)
         }
-        return InitRcTimingObservation(stage, rounds, 128, cpu, error, cleanupError, cleaned)
+        return observation
     }
 
     private external fun nativeCollect(directory: String): String

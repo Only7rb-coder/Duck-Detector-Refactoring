@@ -51,6 +51,7 @@ struct InitRcTimingIo {
     int (*current_cpu)();
     int (*stat_fd)(int, struct stat *);
     std::int64_t (*now)();
+    int (*verify_affinity)(int expected_cpu);
 };
 
 InitRcTimingResult collect_initrc_timing(const char *private_directory,

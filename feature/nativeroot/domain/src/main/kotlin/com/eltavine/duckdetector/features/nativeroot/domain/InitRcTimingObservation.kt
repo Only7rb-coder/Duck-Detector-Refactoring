@@ -49,6 +49,11 @@ data class InitRcTimingObservation(
     val cleanupCompleted: Boolean = false,
     val failureDetail: String = "",
 ) {
+    /** Necessary sample invariants shared by wire validation and typed report analysis. */
+    val hasCompleteSample: Boolean get() = rounds.size == 32 && iterations == 128 && cpu >= 0 &&
+        rounds.all { round -> round.durations.all { it in 1..1_000_000_000L } } &&
+        rounds.sumOf { it.durations.sum() } < 1_000_000_000L
+
     val analysis: InitRcTimingAnalysis get() = analyzeInitRcTiming(this)
 }
 

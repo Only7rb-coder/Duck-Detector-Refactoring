@@ -24,9 +24,7 @@ fun analyzeInitRcTiming(observation: InitRcTimingObservation): InitRcTimingAnaly
         observation.errorNumber != 0 || observation.cleanupErrorNumber != 0
     ) return InitRcTimingAnalysis(InitRcTimingVerdict.NOT_EVALUATED)
     // The native budget is one second. A malformed, incomplete or unpinned run cannot be a control.
-    if (observation.rounds.size != 32 || observation.iterations != 128 || observation.cpu < 0 ||
-        observation.rounds.any { round -> round.durations.any { it !in 1..1_000_000_000L } }
-    ) return InitRcTimingAnalysis(InitRcTimingVerdict.INCONCLUSIVE)
+    if (!observation.hasCompleteSample) return InitRcTimingAnalysis(InitRcTimingVerdict.INCONCLUSIVE)
 
     val contrasts = observation.rounds.map {
         ((it.initTargetNanos.toDouble() - it.initControlNanos) -

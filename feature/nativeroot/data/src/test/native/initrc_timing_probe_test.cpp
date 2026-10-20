@@ -26,14 +26,22 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <map>
+#include <new>
 #include <pthread.h>
 #include <string>
+#include <system_error>
 #include <unistd.h>
 #include <vector>
 
 using namespace duckdetector::nativeroot;
 namespace {
-enum class Fault { NONE, NAME, READBACK, PIN, CPU, CPU_DENIED, CLOCK, STAT, ATTRIBUTES, BUDGET, CLEANUP, DOUBLE_FAILURE };
+enum class Fault {
+    NONE, NAME, READBACK, NAME_CHANGED_IN_BATCH, READBACK_DENIED_AFTER_BATCH,
+    PIN, CPU, CPU_DENIED, AFFINITY_WIDENED, AFFINITY_DENIED,
+    CLOCK, STAT, ATTRIBUTES, TRANSIENT_ATTRIBUTES, TRANSIENT_OWNER, TRANSIENT_LINK_COUNT,
+    WORKER_THROW, ALLOCATION_THROW, UNKNOWN_THROW,
+    BUDGET, CLEANUP, DOUBLE_FAILURE,
+};
 struct Fixture {
     Fault fault = Fault::NONE;
     pthread_t caller = pthread_self();
@@ -66,6 +74,10 @@ int set_name(const char *name) {
     return 0;
 }
 int get_name(char *name) {
+    if (fixture->fault == Fault::READBACK_DENIED_AFTER_BATCH && fixture->calls) {
+        errno = EPERM;
+        return -1;
+    }
     const auto &value = fixture->fault == Fault::READBACK && fixture->name_changes > 0
         ? std::string("wrong") : fixture->name;
     std::strcpy(name, value.c_str());
@@ -79,6 +91,12 @@ int pin_cpu() {
 int cpu() {
     if (fixture->fault == Fault::CPU_DENIED) { errno = EPERM; return -1; }
     return fixture->fault == Fault::CPU && fixture->calls ? 3 : 2;
+}
+int verify_affinity(int expected) {
+    assert(expected == 2);
+    if (fixture->fault == Fault::AFFINITY_DENIED) { errno = EACCES; return -1; }
+    if (fixture->fault == Fault::AFFINITY_WIDENED && fixture->calls) { errno = EAGAIN; return -1; }
+    return 0;
 }
 std::int64_t now() {
     if (fixture->fault == Fault::CLOCK) { errno = EIO; return 0; }
@@ -94,10 +112,17 @@ int stat_fd(int fd, struct stat *attributes) {
     const int condition = (fixture->name == "init" ? 2 : 0) + (target ? 1 : 0);
     if (fixture->calls % kInitRcIterations == 0) fixture->conditions.push_back(condition);
     ++fixture->calls;
+    if (fixture->fault == Fault::NAME_CHANGED_IN_BATCH) fixture->name = "changed";
+    if (fixture->fault == Fault::WORKER_THROW) throw std::system_error(EBUSY, std::generic_category());
+    if (fixture->fault == Fault::ALLOCATION_THROW) throw std::bad_alloc();
+    if (fixture->fault == Fault::UNKNOWN_THROW) throw 1;
     if (fixture->fault == Fault::STAT) { errno = EACCES; return -1; }
     const int result = fstat(fd, attributes);
     assert(result == 0 && S_ISREG(attributes->st_mode) && attributes->st_nlink == 2);
     if (fixture->fault == Fault::ATTRIBUTES) ++attributes->st_ino;
+    if (fixture->fault == Fault::TRANSIENT_ATTRIBUTES && fixture->calls == 1) ++attributes->st_ino;
+    if (fixture->fault == Fault::TRANSIENT_OWNER && fixture->calls == 1) ++attributes->st_uid;
+    if (fixture->fault == Fault::TRANSIENT_LINK_COUNT && fixture->calls == 1) --attributes->st_nlink;
     fixture->clock += 100 + (target ? 5 : 0) + (fixture->name == "init" ? 10 : 0) +
         (condition == 3 ? 50 : 0);
     if (fixture->fault == Fault::BUDGET && fixture->calls > kInitRcIterations * 8)
@@ -111,7 +136,7 @@ int stat_fd(int fd, struct stat *attributes) {
     if (fixture->fault == Fault::DOUBLE_FAILURE) { errno = EACCES; return -1; }
     return result;
 }
-const InitRcTimingIo io{set_name, get_name, pin_cpu, cpu, stat_fd, now};
+const InitRcTimingIo io{set_name, get_name, pin_cpu, cpu, stat_fd, now, verify_affinity};
 int entries(const char *directory) {
     auto *dir = opendir(directory);
     assert(dir);
@@ -153,10 +178,17 @@ void success(const char *directory) {
 void failures(const char *directory) {
     const std::pair<Fault, InitRcTimingStage> cases[] = {
         {Fault::NAME, InitRcTimingStage::NAME_FAILED}, {Fault::READBACK, InitRcTimingStage::NAME_FAILED},
+        {Fault::NAME_CHANGED_IN_BATCH, InitRcTimingStage::NAME_FAILED},
+        {Fault::READBACK_DENIED_AFTER_BATCH, InitRcTimingStage::NAME_FAILED},
         {Fault::PIN, InitRcTimingStage::AFFINITY_FAILED}, {Fault::CPU, InitRcTimingStage::AFFINITY_FAILED},
         {Fault::CPU_DENIED, InitRcTimingStage::AFFINITY_FAILED},
+        {Fault::AFFINITY_WIDENED, InitRcTimingStage::AFFINITY_FAILED},
+        {Fault::AFFINITY_DENIED, InitRcTimingStage::AFFINITY_FAILED},
         {Fault::CLOCK, InitRcTimingStage::CLOCK_FAILED}, {Fault::STAT, InitRcTimingStage::SYSCALL_FAILED},
         {Fault::ATTRIBUTES, InitRcTimingStage::SYSCALL_FAILED}, {Fault::BUDGET, InitRcTimingStage::TIMED_OUT},
+        {Fault::TRANSIENT_ATTRIBUTES, InitRcTimingStage::SYSCALL_FAILED},
+        {Fault::TRANSIENT_OWNER, InitRcTimingStage::SYSCALL_FAILED},
+        {Fault::TRANSIENT_LINK_COUNT, InitRcTimingStage::SYSCALL_FAILED},
     };
     for (const auto &test : cases) {
         Fixture state;
@@ -165,7 +197,22 @@ void failures(const char *directory) {
         assert(result.stage == test.second && result.error != 0 && result.count < 32);
         assert(result.cleanup_complete && entries(directory) == 0 && state.worker_only);
         if (test.first == Fault::CPU_DENIED) assert(result.error == EPERM);
+        if (test.first == Fault::READBACK_DENIED_AFTER_BATCH) assert(result.error == EPERM);
+        if (test.first == Fault::AFFINITY_DENIED) assert(result.error == EACCES);
+        if (test.first == Fault::TRANSIENT_ATTRIBUTES || test.first == Fault::TRANSIENT_OWNER ||
+            test.first == Fault::TRANSIENT_LINK_COUNT) assert(state.calls == 1 && result.error == ESTALE);
         assert(state.name == "original");
+    }
+}
+void worker_exceptions(const char *directory) {
+    for (const auto fault : {Fault::WORKER_THROW, Fault::ALLOCATION_THROW, Fault::UNKNOWN_THROW}) {
+        Fixture state;
+        state.fault = fault;
+        const auto result = collect(directory, state);
+        assert(result.stage == InitRcTimingStage::THREAD_FAILED && result.count == 0);
+        assert(result.error == (fault == Fault::WORKER_THROW ? EBUSY :
+                               fault == Fault::ALLOCATION_THROW ? ENOMEM : EIO));
+        assert(result.cleanup_complete && entries(directory) == 0 && state.worker_only);
     }
 }
 void cleanup_failure(const char *directory, bool double_failure) {
@@ -186,6 +233,7 @@ int main() {
     assert(mkdtemp(directory));
     success(directory);
     failures(directory);
+    worker_exceptions(directory);
     cleanup_failure(directory, false);
     cleanup_failure(directory, true);
     Fixture state;

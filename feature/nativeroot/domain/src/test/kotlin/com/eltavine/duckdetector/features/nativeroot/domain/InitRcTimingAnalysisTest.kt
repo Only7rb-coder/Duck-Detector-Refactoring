@@ -87,6 +87,17 @@ class InitRcTimingAnalysisTest {
         }
     }
 
+    @Test
+    fun `individually valid batches cannot exceed the whole experiment budget`() {
+        val fullSecond = observation(List(32) { 50L }).copy(
+            rounds = List(32) { InitRcTimingRound(7_812_500, 7_812_500, 7_812_500, 7_812_500) },
+        )
+        assertEquals(InitRcTimingVerdict.INCONCLUSIVE, fullSecond.analysis.verdict)
+        assertEquals(InitRcTimingVerdict.INCONCLUSIVE, fullSecond.copy(
+            rounds = List(32) { InitRcTimingRound(10_000_000, 10_000_000, 10_000_000, 10_000_000) },
+        ).analysis.verdict)
+    }
+
     private fun observation(effects: List<Long>) = InitRcTimingObservation(
         collection = InitRcTimingCollection.COLLECTED,
         cpu = 2,

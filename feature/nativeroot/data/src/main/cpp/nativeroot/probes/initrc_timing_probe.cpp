@@ -21,8 +21,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
-#include <pthread.h>
+#include <future>
+#include <new>
 #include <string>
+#include <system_error>
 #include <time.h>
 #include <unistd.h>
 
@@ -54,6 +56,16 @@ int pin_cpu() {
     errno = EINVAL;
     return -1;
 }
+int verify_affinity(int expected_cpu) {
+    cpu_set_t current;
+    CPU_ZERO(&current);
+    if (sched_getaffinity(0, sizeof(current), &current) != 0) return -1;
+    if (CPU_COUNT(&current) != 1 || !CPU_ISSET(expected_cpu, &current)) {
+        errno = EAGAIN;
+        return -1;
+    }
+    return 0;
+}
 int stat_fd(int fd, struct stat *value) {
     // Bionic Android 16 SYSCALLS.TXT maps lp64 fstat to this native syscall/structure.
     // fstatat is a different syscall and would not exercise the reviewed KSU hook.
@@ -64,7 +76,7 @@ std::int64_t monotonic_now() {
     if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) return 0;
     return static_cast<std::int64_t>(value.tv_sec) * 1'000'000'000 + value.tv_nsec;
 }
-const InitRcTimingIo kIo{set_name, get_name, pin_cpu, sched_getcpu, stat_fd, monotonic_now};
+const InitRcTimingIo kIo{set_name, get_name, pin_cpu, sched_getcpu, stat_fd, monotonic_now, verify_affinity};
 #endif
 
 void fail(InitRcTimingResult &result, InitRcTimingStage stage, int error) {
@@ -75,7 +87,8 @@ void fail(InitRcTimingResult &result, InitRcTimingStage stage, int error) {
 }
 bool same_file(const struct stat &a, const struct stat &b) {
     return S_ISREG(a.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino &&
-           a.st_mode == b.st_mode && a.st_size == b.st_size;
+           a.st_mode == b.st_mode && a.st_size == b.st_size && a.st_nlink == b.st_nlink &&
+           a.st_uid == b.st_uid && a.st_gid == b.st_gid;
 }
 struct Worker {
     const InitRcTimingIo &io;
@@ -86,26 +99,38 @@ struct Worker {
 };
 
 bool check_cpu(Worker &worker) {
+    if (worker.io.verify_affinity(worker.result.cpu) != 0) {
+        fail(worker.result, InitRcTimingStage::AFFINITY_FAILED, errno);
+        return false;
+    }
     const int cpu = worker.io.current_cpu();
     if (cpu == worker.result.cpu) return true;
     fail(worker.result, InitRcTimingStage::AFFINITY_FAILED, cpu < 0 ? errno : EAGAIN);
     return false;
 }
 
+bool check_name(Worker &worker, const char *name) {
+    char actual[16]{};
+    if (worker.io.get_name(actual) != 0) {
+        fail(worker.result, InitRcTimingStage::NAME_FAILED, errno);
+        return false;
+    }
+    if (std::strncmp(name, actual, sizeof(actual)) != 0) {
+        fail(worker.result, InitRcTimingStage::NAME_FAILED, EIO);
+        return false;
+    }
+    return true;
+}
+
 bool batch(Worker &worker, int condition, std::int64_t &duration) {
     auto &out = worker.result;
     const auto &io = worker.io;
     const char *name = condition >= 2 ? "init" : "duck";
-    char actual[16]{};
-    if (io.set_name(name) != 0 || io.get_name(actual) != 0) {
+    if (io.set_name(name) != 0) {
         fail(out, InitRcTimingStage::NAME_FAILED, errno);
         return false;
     }
-    if (std::strncmp(name, actual, sizeof(actual)) != 0) {
-        fail(out, InitRcTimingStage::NAME_FAILED, EIO);
-        return false;
-    }
-    if (!check_cpu(worker)) return false;
+    if (!check_name(worker, name) || !check_cpu(worker)) return false;
     const int fd = condition % 2 ? worker.target_fd : worker.control_fd;
     struct stat attributes{};
     const std::int64_t begin = io.now();
@@ -119,17 +144,18 @@ bool batch(Worker &worker, int condition, std::int64_t &duration) {
             fail(out, InitRcTimingStage::SYSCALL_FAILED, errno);
             return false;
         }
+        // Validate each result: a transient mismatch can disappear before the batch's final call.
+        if (!same_file(worker.expected, attributes)) {
+            fail(out, InitRcTimingStage::SYSCALL_FAILED, ESTALE);
+            return false;
+        }
     }
     const std::int64_t end = io.now();
     if (end <= begin) {
         fail(out, InitRcTimingStage::CLOCK_FAILED, end <= 0 ? errno : EIO);
         return false;
     }
-    if (!same_file(worker.expected, attributes)) {
-        fail(out, InitRcTimingStage::SYSCALL_FAILED, ESTALE);
-        return false;
-    }
-    if (!check_cpu(worker)) return false;
+    if (!check_name(worker, name) || !check_cpu(worker)) return false;
     duration = end - begin;
     return true;
 }
@@ -224,13 +250,17 @@ InitRcTimingResult run(const char *base, const InitRcTimingIo &io) {
     }
     if (out.stage == InitRcTimingStage::COLLECTED) {
         Worker worker{io, control_fd, target_fd, expected, out};
-        pthread_t thread;
-        const int error = pthread_create(&thread, nullptr, measure, &worker);
-        if (error) fail(out, InitRcTimingStage::THREAD_FAILED, error);
-        else {
-            // Default attributes create a joinable thread owned only here; this is never a self-join.
-            const int join_error = pthread_join(thread, nullptr);
-            if (join_error) fail(out, InitRcTimingStage::THREAD_FAILED, join_error);
+        try {
+            // Explicit async forbids deferred execution on the caller. The standard's
+            // futures.async completion guarantee also protects worker/FD lifetimes on exceptions.
+            auto completion = std::async(std::launch::async, [&worker] { measure(&worker); });
+            completion.get();
+        } catch (const std::system_error &error) {
+            fail(out, InitRcTimingStage::THREAD_FAILED, error.code().value());
+        } catch (const std::bad_alloc &) {
+            fail(out, InitRcTimingStage::THREAD_FAILED, ENOMEM);
+        } catch (...) {
+            fail(out, InitRcTimingStage::THREAD_FAILED, EIO);
         }
     }
     // close(EINTR) must not be retried: Android may have already released/reused the descriptor.
