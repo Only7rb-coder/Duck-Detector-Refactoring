@@ -47,4 +47,10 @@ val kernelPatchLatencyHostTest = tasks.register<Exec>("kernelPatchLatencyHostTes
     commandLine("python3", layout.projectDirectory.file("src/test/native/test_kernelpatch_latency_evidence.py").asFile)
 }
 
-tasks.named("unitTest") { dependsOn(srcuCloseHostTest, kernelPatchLatencyHostTest) }
+val initRcTimingHostTest = tasks.register<Exec>("initRcTimingHostTest") {
+    group = "verification"
+    description = "Verifies init.rc timing controls, resource ownership and injected failure paths."
+    commandLine("python3", layout.projectDirectory.file("src/test/native/test_initrc_timing_probe.py").asFile)
+}
+
+tasks.named("unitTest") { dependsOn(srcuCloseHostTest, kernelPatchLatencyHostTest, initRcTimingHostTest) }

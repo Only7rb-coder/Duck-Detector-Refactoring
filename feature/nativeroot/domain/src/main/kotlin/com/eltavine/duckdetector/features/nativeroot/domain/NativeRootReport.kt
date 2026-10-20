@@ -170,6 +170,7 @@ data class NativeRootReport(
     val ksuThroneHuntStimulusDetail: String = "",
     val ksuThroneHuntDiagnosticDetail: String = "",
     val srcuTiming: SrcuTimingObservation = SrcuTimingObservation(),
+    val initRcTiming: InitRcTimingObservation = InitRcTimingObservation(),
 ) {
     val directFindings: List<NativeRootFinding>
         get() = findings.filter { it.group == NativeRootGroup.SYSCALL || it.group == NativeRootGroup.SIDE_CHANNEL }
