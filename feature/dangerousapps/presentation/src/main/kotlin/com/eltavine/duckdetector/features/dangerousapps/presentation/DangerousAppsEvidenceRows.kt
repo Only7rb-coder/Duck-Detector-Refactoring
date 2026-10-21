@@ -25,6 +25,7 @@ import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousDetectio
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckKind
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckState
 import com.eltavine.duckdetector.features.dangerousapps.domain.ThanoxIpcState
+import com.eltavine.duckdetector.features.dangerousapps.domain.isWarningEvidence
 import com.eltavine.duckdetector.features.dangerousapps.domain.toDetectorStatus
 import com.eltavine.duckdetector.features.dangerousapps.presentation.model.DangerousAppsDetailRowModel
 import com.eltavine.duckdetector.features.dangerousapps.presentation.model.DangerousAppsHeaderFact
@@ -34,7 +35,7 @@ internal fun dangerousAppsImpactRows(report: DangerousAppsReport): List<Dangerou
     DangerousAppsDetailRowModel("Interpretation", when {
         report.stage != DangerousAppsStage.READY -> "Evaluation incomplete"
         report.hiddenCount > 0 -> "Package visibility mismatch"
-        report.behaviorChecks.any { it.state in setOf(HmaCheckState.INCONSISTENT, HmaCheckState.TIMING_ANOMALY) } -> "Behavior evidence observed"
+        report.behaviorChecks.any { it.isWarningEvidence() } -> "Behavior evidence observed"
         report.detectedCount > 0 -> "Catalog package presence"
         report.thanoxIpc.state == ThanoxIpcState.MATCHED -> "Runtime service presence"
         else -> "Available evidence only"
@@ -56,12 +57,11 @@ internal fun dangerousAppsMethodRows(report: DangerousAppsReport): List<Dangerou
             else -> DetectorStatus.info(InfoKind.SUPPORT)
         }, "A listed probe ran in this scan. Zero hits do not establish full visibility; related package probes can share the same underlying mechanism.")
     } + report.thanoxIpc.toMethodRow() + report.behaviorChecks.map { check ->
-        DangerousAppsDetailRowModel(check.kind.label, check.state.label, when (check.state) {
-            HmaCheckState.INCONSISTENT, HmaCheckState.TIMING_ANOMALY -> DetectorStatus.warning()
-            HmaCheckState.CONSISTENT -> DetectorStatus.allClear()
-            HmaCheckState.UNAVAILABLE -> DetectorStatus.info(InfoKind.ERROR)
-            HmaCheckState.EXPERIMENTAL_ANOMALY, HmaCheckState.UNSUPPORTED, HmaCheckState.INCONCLUSIVE,
-            HmaCheckState.PERMISSION_LIMITED, HmaCheckState.PARTIAL -> DetectorStatus.info(InfoKind.SUPPORT)
+        DangerousAppsDetailRowModel(check.kind.label, check.state.label, when {
+            check.isWarningEvidence() -> DetectorStatus.warning()
+            check.state == HmaCheckState.CONSISTENT -> DetectorStatus.allClear()
+            check.state == HmaCheckState.UNAVAILABLE -> DetectorStatus.info(InfoKind.ERROR)
+            else -> DetectorStatus.info(InfoKind.SUPPORT)
         }, buildString {
             append(check.detail)
             if (check.packages.isNotEmpty()) append(" Packages: ${check.packages.joinToString()}.")
@@ -71,7 +71,7 @@ internal fun dangerousAppsMethodRows(report: DangerousAppsReport): List<Dangerou
 }
 
 internal fun dangerousAppsRuntimeFact(report: DangerousAppsReport): DangerousAppsHeaderFactModel {
-    val hits = report.behaviorChecks.count { it.state in setOf(HmaCheckState.INCONSISTENT, HmaCheckState.TIMING_ANOMALY) } +
+    val hits = report.behaviorChecks.count { it.isWarningEvidence() } +
         if (report.thanoxIpc.state == ThanoxIpcState.MATCHED) 1 else 0
     val behaviorKinds = report.behaviorChecks.mapTo(mutableSetOf()) { it.kind }
     val complete = report.thanoxIpc.complete && behaviorKinds.containsAll(HmaCheckKind.entries) &&

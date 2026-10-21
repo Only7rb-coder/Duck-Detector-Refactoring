@@ -49,6 +49,20 @@ data class HmaBehaviorCheck(
     val uidPermissionEvidence: List<HmaUidPermissionEvidence> = emptyList(),
 )
 
+/**
+ * Only controlled interface mismatches with an attribution path contribute a warning.
+ *
+ * UID/task association is affected by OEM task visibility, instant-app policy and shared UIDs. The
+ * probe deliberately records those observations, but it cannot identify a hidden package. Keep it
+ * visible as supporting evidence without letting a small number of unassociated task UIDs turn the
+ * entire Dangerous Apps card into a warning.
+ */
+fun HmaBehaviorCheck.isWarningEvidence(): Boolean = when (kind) {
+    HmaCheckKind.UID_TASK_VISIBILITY,
+    HmaCheckKind.UID_PERMISSION_VISIBILITY -> false
+    else -> state == HmaCheckState.INCONSISTENT || state == HmaCheckState.TIMING_ANOMALY
+}
+
 enum class HmaCallOutcome { SECURITY_EXCEPTION, RETURNED, NAME_NOT_FOUND, FAILED, UNAVAILABLE }
 
 data class HmaExceptionObservation(

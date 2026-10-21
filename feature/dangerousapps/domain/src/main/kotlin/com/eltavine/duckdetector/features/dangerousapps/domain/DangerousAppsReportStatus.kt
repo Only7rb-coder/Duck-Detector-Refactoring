@@ -26,8 +26,7 @@ fun DangerousAppsReport.toDetectorStatus(): DetectorStatus {
         DangerousAppsStage.FAILED -> DetectorStatus.info(InfoKind.ERROR)
         DangerousAppsStage.READY -> when {
             hiddenCount > 0 -> DetectorStatus.danger()
-            behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } -> DetectorStatus.warning()
-            behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } -> DetectorStatus.warning()
+            behaviorChecks.any { it.isWarningEvidence() } -> DetectorStatus.warning()
             detectedCount > 0 -> DetectorStatus.warning()
             thanoxIpc.state == ThanoxIpcState.MATCHED -> DetectorStatus.warning()
             suspiciousSharedStorageDenied -> DetectorStatus.warning()

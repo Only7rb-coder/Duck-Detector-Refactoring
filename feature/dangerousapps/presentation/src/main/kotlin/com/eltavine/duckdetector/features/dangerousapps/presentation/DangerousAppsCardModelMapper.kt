@@ -24,6 +24,7 @@ import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousAppsRepo
 import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousAppsStage
 import com.eltavine.duckdetector.features.dangerousapps.domain.DangerousPackageVisibility
 import com.eltavine.duckdetector.features.dangerousapps.domain.HmaCheckState
+import com.eltavine.duckdetector.features.dangerousapps.domain.isWarningEvidence
 import com.eltavine.duckdetector.features.dangerousapps.domain.PackageChangeHistoryState
 import com.eltavine.duckdetector.features.dangerousapps.domain.ThanoxIpcState
 import com.eltavine.duckdetector.features.dangerousapps.domain.toDetectorStatus
@@ -90,8 +91,8 @@ class DangerousAppsCardModelMapper {
             DangerousAppsStage.FAILED -> "Inventory scan failed"
             DangerousAppsStage.READY -> when {
                 report.hiddenCount > 0 -> "HMA-style concealment detected"
-                report.behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } -> "Platform behavior mismatch observed"
-                report.behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } -> "Repeated callback timeout asymmetry"
+                report.behaviorChecks.any { it.isWarningEvidence() && it.state == HmaCheckState.INCONSISTENT } -> "Platform behavior mismatch observed"
+                report.behaviorChecks.any { it.isWarningEvidence() && it.state == HmaCheckState.TIMING_ANOMALY } -> "Repeated callback timeout asymmetry"
                 report.detectedCount > 0 -> "${report.detectedCount} risky package(s) surfaced"
                 report.thanoxIpc.state == ThanoxIpcState.MATCHED -> "Thanox-compatible runtime service observed"
                 report.suspiciousSharedStorageDenied -> "Shared storage baseline denied"
@@ -121,10 +122,10 @@ class DangerousAppsCardModelMapper {
                 report.hiddenCount > 0 ->
                     "${report.hiddenCount} package(s) were visible to direct corroboration probes but absent from PackageManager inventory."
 
-                report.behaviorChecks.any { it.state == HmaCheckState.INCONSISTENT } ->
+                report.behaviorChecks.any { it.isWarningEvidence() && it.state == HmaCheckState.INCONSISTENT } ->
                     "Controlled interface checks observed inconsistent exception, broadcast callback, UID visibility or seccomp getpriority behavior. These signals do not identify a specific hiding module."
 
-                report.behaviorChecks.any { it.state == HmaCheckState.TIMING_ANOMALY } ->
+                report.behaviorChecks.any { it.isWarningEvidence() && it.state == HmaCheckState.TIMING_ANOMALY } ->
                     "Target callbacks repeatedly missed their deadlines while interleaved caller controls succeeded. This is lower-confidence timing evidence; scheduling and OEM behavior can also delay delivery."
 
                 report.detectedCount > 0 ->

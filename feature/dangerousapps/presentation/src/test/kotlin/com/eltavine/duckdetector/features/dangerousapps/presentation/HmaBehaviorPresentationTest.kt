@@ -32,14 +32,14 @@ class HmaBehaviorPresentationTest {
         DangerousAppsStage.READY, DangerousPackageVisibility.FULL, 200, false, false,
         emptyList(), emptyList(), emptyList(), emptyList(), behaviorChecks = listOf(check))
 
-    @Test fun `UID mismatch stays warning and exports numeric evidence without inventing a package`() {
+    @Test fun `UID mismatch stays informational and exports numeric evidence without inventing a package`() {
         val model = DangerousAppsCardModelMapper().map(report(HmaBehaviorCheck(
             HmaCheckKind.UID_TASK_VISIBILITY, HmaCheckState.INCONSISTENT,
             "No visible package association.", uids = listOf(10042))))
-        assertEquals(DetectionSeverity.WARNING, model.status.severity)
+        assertEquals(DetectionSeverity.INFO, model.status.severity)
         assertEquals(null, model.hmaAlert)
         assertTrue(model.methodRows.any { it.detail.orEmpty().contains("10042") })
-        assertEquals("Platform behavior mismatch observed", model.verdict)
+        assertEquals("Behavior checks incomplete", model.verdict)
     }
 
     @Test fun `seccomp getpriority evidence stays warning and exports its own check`() {
@@ -99,7 +99,7 @@ class HmaBehaviorPresentationTest {
                 HmaCheckKind.UID_TASK_VISIBILITY, state, "Measured scope", uids = listOf(10042))))
             val row = model.methodRows.single { it.label == HmaCheckKind.UID_TASK_VISIBILITY.label }
             val expected = when (state) {
-                HmaCheckState.INCONSISTENT, HmaCheckState.TIMING_ANOMALY -> DetectorStatus.warning()
+                HmaCheckState.INCONSISTENT, HmaCheckState.TIMING_ANOMALY -> DetectorStatus.info(InfoKind.SUPPORT)
                 HmaCheckState.CONSISTENT -> DetectorStatus.allClear()
                 HmaCheckState.UNAVAILABLE -> DetectorStatus.info(InfoKind.ERROR)
                 else -> DetectorStatus.info(InfoKind.SUPPORT)
